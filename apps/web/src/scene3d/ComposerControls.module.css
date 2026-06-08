@@ -1,0 +1,167 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  position: relative;
+}
+
+/* Icon-only trigger button. */
+.trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: #101a28;
+  color: var(--c-text-muted);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.trigger:hover {
+  border-color: #34507a;
+  color: var(--c-text);
+}
+
+.triggerActive {
+  color: var(--c-text);
+  border-color: var(--c-accent);
+  background: #13233a;
+}
+
+/* Selection count badge, pinned to the trigger's top-right corner. */
+.countBadge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  background: var(--c-accent);
+  color: var(--c-on-accent);
+  border-radius: 999px;
+  font-size: 9px;
+  min-width: 15px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+
+.popoverHeader {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #5d6b80;
+  padding: 4px 8px 6px;
+}
+
+/* Spans the full row width so it always fits the narrow sidebar; scrolls
+   internally if the option list is long. */
+.popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--c-bg-panel);
+  border: 1px solid #223047;
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  z-index: 40;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  color: #cdd8e6;
+  border: none;
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.option:hover {
+  background: #16314b66;
+  color: var(--c-text);
+}
+
+.optionActive {
+  color: var(--c-text-selected);
+}
+
+.check {
+  width: 12px;
+  color: var(--c-accent);
+  font-size: 11px;
+  flex: 0 0 auto;
+}
+
+.exampleOption {
+  background: transparent;
+  color: #8aa0bb;
+  border: none;
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.exampleOption:hover {
+  background: #16314b66;
+  color: var(--c-text);
+}
+
+@media (max-width: 640px) {
+  .row {
+    gap: 8px;
+  }
+
+  .trigger {
+    width: 38px;
+    height: 38px;
+  }
+
+  .countBadge {
+    min-width: 17px;
+    height: 17px;
+    font-size: 10px;
+  }
+
+  .popover {
+    top: calc(100% + 8px);
+    max-height: min(320px, 48svh);
+    padding: 8px;
+    gap: 4px;
+  }
+
+  .popoverHeader {
+    padding: 6px 8px 8px;
+    font-size: 11px;
+  }
+
+  .option,
+  .exampleOption {
+    min-height: 40px;
+    padding: 9px 10px;
+    font-size: 13px;
+  }
+
+  .check {
+    width: 16px;
+    font-size: 12px;
+  }
+}

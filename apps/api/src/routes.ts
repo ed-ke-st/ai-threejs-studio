@@ -1,0 +1,636 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { nanoid } from "nanoid";
+import type { FastifyInstance } from "fastify";
+import { getTemplate } from "@ai-threejs-studio/three-templates";
+import type { AppSettingsUpdate, ProjectShare } from "@ai-threejs-studio/shared";
+import { z } from "zod";
+import { createScene3DSceneFiles, defaultScene3D } from "@ai-threejs-studio/scene3d/codegen";
+import { SCENE_CONFIG_PATH, validateScene3D } from "@ai-threejs-studio/scene3d";
+import { config } from "./config.js";
+import { Scene3DAgent } from "./agent/scene3dAgent.js";
+import { Scene3DGenerator, type SceneGenerator } from "./agent/scene3dGenerator.js";
+import { ClaudeSceneGenerator } from "./agent/claudeSceneGenerator.js";
+import type { ProjectAssetLibrary } from "./assets/projectAssetLibrary.js";
+import type { ProjectExportService } from "./export/projectExport.js";
+import type { LocalProjectRepository } from "./projects.js";
+import type { LocalSettingsRepository } from "./settings.js";
+import type { PreviewRunner } from "./preview/previewRunner.js";
+import type { LocalRagService } from "./rag/localRagService.js";
+import type { ProjectStorage } from "./storage/localWorkspaceStorage.js";
+
+const createProjectSchema = z.object({
+  name: z.string().min(1).default("Untitled Project"),
+  templateId: z
+    .enum(["blank-r3f-scene", "glb-viewer", "product-configurator", "room-scene", "interactive-planner"])
+    .default("blank-r3f-scene")
+});
+
+const writeFileSchema = z.object({
+  content: z.string()
+});
+
+const searchDocsSchema = z.object({
+  query: z.string().min(1),
+  collections: z.array(z.string()).optional(),
+  limit: z.number().int().min(1).max(20).optional(),
+  projectId: z.string().min(1).optional()
+});
+
+const uploadAssetSchema = z.object({
+  name: z.string().min(1),
+  type: z.enum(["model/glb", "model/gltf", "texture/image", "environment/hdri", "image/reference", "material/preset"]),
+  contentBase64: z.string().min(1)
+});
+
+const createSnapshotSchema = z.object({
+  label: z.string().min(1).max(80).optional()
+});
+
+const vector3Schema = z.tuple([z.number(), z.number(), z.number()]);
+
+const sceneTransformSchema = z.object({
+  position: vector3Schema.optional(),
+  rotation: vector3Schema.optional(),
+  scale: vector3Schema.optional()
+});
+
+const sceneMaterialSchema = z.object({
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  roughness: z.number().min(0).max(1).optional(),
+  metalness: z.number().min(0).max(1).optional()
+});
+
+const sceneCameraSchema = z.object({
+  framing: z.string().min(1),
+  position: vector3Schema.optional(),
+  target: vector3Schema.optional()
+});
+
+const sceneEnvironmentSchema = z.object({
+  preset: z.string().min(1),
+  backgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  notes: z.string().min(1).optional()
+});
+
+const sceneObjectSchema = z.object({
+  id: z.string().min(1),
+  type: z.enum(["mesh", "group", "light", "model"]),
+  label: z.string().min(1),
+  editable: z.boolean(),
+  visible: z.boolean(),
+  assetId: z.string().min(1).optional(),
+  assetUrl: z.string().min(1).optional(),
+  geometry: z.enum(["box", "plane", "sphere", "cylinder", "frame", "wall", "floor", "capsule"]).optional(),
+  lightKind: z.enum(["ambient", "point", "directional", "spot"]).optional(),
+  intensity: z.number().min(0).max(6).optional(),
+  parentId: z.string().min(1).optional(),
+  notes: z.string().min(1).optional(),
+  transform: z.object({
+    position: vector3Schema,
+    rotation: vector3Schema,
+    scale: vector3Schema
+  }),
+  material: z.object({
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    roughness: z.number().min(0).max(1),
+    metalness: z.number().min(0).max(1)
+  })
+});
+
+const sceneMetadataSchema = z.object({
+  objects: z.array(sceneObjectSchema).min(1),
+  camera: sceneCameraSchema.optional(),
+  environment: sceneEnvironmentSchema.optional()
+});
+
+const sceneObjectPatchSchema = sceneObjectSchema
+  .omit({ id: true })
+  .partial()
+  .extend({
+    transform: sceneTransformSchema.optional(),
+    material: sceneMaterialSchema.optional()
+  });
+
+const appSettingsSchema = z.object({
+  aiProvider: z.enum(["gemini", "openai", "claude", "auto"]).optional(),
+  geminiApiKey: z.string().optional(),
+  openAiApiKey: z.string().optional(),
+  anthropicApiKey: z.string().optional(),
+  clearGeminiApiKey: z.boolean().optional(),
+  clearOpenAiApiKey: z.boolean().optional(),
+  clearAnthropicApiKey: z.boolean().optional()
+});
+
+export function registerRoutes(
+  app: FastifyInstance,
+  storage: ProjectStorage,
+  projectRepository: LocalProjectRepository,
+  previewRunner: PreviewRunner,
+  ragService: LocalRagService,
+  projectExportService: ProjectExportService,
+  assetLibrary: ProjectAssetLibrary,
+  settingsRepository: LocalSettingsRepository
+): void {
+  const shares = new Map<string, ProjectShare>();
+
+  app.get("/health", async () => ({
+    ok: true,
+    service: "ai-threejs-studio-api",
+    time: new Date().toISOString()
+  }));
+
+  // Scene3D agent: structured generate -> validate -> build -> visual-validate ->
+  // repair. Writes the Scene3D-backed source set (shared interpreter + config).
+  app.post("/projects/:id/scene3d/agent-run", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = projectRepository.getProject(id);
+    if (!project) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
+    const body = z
+      .object({
+        prompt: z.string().min(1),
+        mode: z.enum(["new", "refine"]).optional(),
+        selectedObjectId: z.string().min(1).optional(),
+        stream: z.boolean().optional()
+      })
+      .safeParse(request.body ?? {});
+    if (!body.success) {
+      return reply.code(400).send({ error: "A prompt is required." });
+    }
+
+    const settings = settingsRepository.getStoredSettings();
+    const openAiKey = settings.openAiApiKey || config.openAiApiKey;
+    const anthropicKey = settings.anthropicApiKey || config.anthropicApiKey;
+    // Resolve the provider: explicit setting wins; "auto"/"gemini" falls back to
+    // whichever provider has a key (preferring OpenAI, then Claude).
+    const useClaude =
+      settings.aiProvider === "claude" || (settings.aiProvider !== "openai" && !openAiKey && Boolean(anthropicKey));
+
+    const generator: SceneGenerator = useClaude
+      ? new ClaudeSceneGenerator({
+          apiKey: anthropicKey,
+          model: config.anthropicCodeModel,
+          repairModel: config.anthropicRepairModel,
+          maxTokens: config.anthropicMaxTokens,
+          requestTimeoutMs: config.modelRequestTimeoutMs
+        })
+      : new Scene3DGenerator({
+          apiKey: openAiKey,
+          model: config.openAiCodeModel,
+          repairModel: config.openAiRepairModel,
+          requestTimeoutMs: config.modelRequestTimeoutMs
+        });
+    if (!generator.enabled) {
+      return reply.code(400).send({ error: useClaude ? "No Anthropic API key is configured." : "No OpenAI API key is configured." });
+    }
+
+    const retrievedContext = await ragService.searchDocs({
+      query: body.data.prompt,
+      limit: 6,
+      projectId: id,
+      projectName: project.name,
+      templateId: project.templateId
+    });
+    const agent = new Scene3DAgent({ storage, previewRunner, generator, maxRepairAttempts: config.maxAgentFixAttempts });
+
+    // Stream progress as newline-delimited JSON: {type:"progress",stage} events
+    // followed by a final {type:"result",result} (or {type:"error",message}).
+    // This turns the long opaque generate into a live, staged experience.
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      "content-type": "application/x-ndjson; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      "x-accel-buffering": "no"
+    });
+    const write = (event: unknown) => reply.raw.write(`${JSON.stringify(event)}\n`);
+
+    try {
+      const result = await agent.run({
+        projectId: id,
+        prompt: body.data.prompt,
+        retrievedContext,
+        mode: body.data.mode,
+        selectedObjectId: body.data.selectedObjectId,
+        onProgress: (stage) => write({ type: "progress", stage }),
+        onNode: body.data.stream ? (node) => write({ type: "partial-node", node }) : undefined
+      });
+      await projectRepository.touchProject(id);
+      write({ type: "result", result });
+    } catch (error) {
+      write({ type: "error", message: error instanceof Error ? error.message : "Generation failed." });
+    } finally {
+      reply.raw.end();
+    }
+  });
+
+  app.get("/projects", async () => ({
+    projects: projectRepository.listProjects()
+  }));
+
+  app.delete("/projects/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = projectRepository.getProject(id);
+
+    if (!project) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
+
+    previewRunner.stop(id);
+    await storage.deleteProject(id);
+    await assetLibrary.deleteProjectAssets(id);
+    await projectRepository.deleteProject(id);
+
+    return reply.code(204).send();
+  });
+
+  app.get("/settings", async () => {
+    return { settings: settingsRepository.getSettings() };
+  });
+
+  app.put("/settings", async (request) => {
+    const body = appSettingsSchema.parse(request.body ?? {}) as AppSettingsUpdate;
+    const settings = await settingsRepository.updateSettings(body);
+    return { settings };
+  });
+
+  app.post("/docs/search", async (request) => {
+    const body = searchDocsSchema.parse(request.body ?? {});
+    const project = body.projectId ? projectRepository.getProject(body.projectId) : null;
+    const chunks = await ragService.searchDocs({
+      ...body,
+      projectName: project?.name,
+      templateId: project?.templateId
+    });
+    return { chunks };
+  });
+
+  app.get("/projects/:id/assets", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = projectRepository.getProject(id);
+
+    if (!project) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
+
+    return {
+      assets: await assetLibrary.listProjectAssets(id)
+    };
+  });
+
+  app.post("/projects/:id/assets/upload", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = projectRepository.getProject(id);
+
+    if (!project) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
+
+    const body = uploadAssetSchema.parse(request.body ?? {});
+
+    try {
+      const asset = await assetLibrary.createProjectAsset({
+        projectId: id,
+        name: body.name,
+        type: body.type,
+        contentBase64: body.contentBase64
+      });
+      await projectRepository.touchProject(id);
+      return reply.code(201).send({ asset });
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : "Asset upload failed" });
+    }
+  });
+
+  app.get("/projects/:id/assets/:assetId/content", async (request, reply) => {
+    const { id, assetId } = request.params as { id: string; assetId: string };
+
+    try {
+      const file = await assetLibrary.readProjectAssetContent(id, assetId);
+      reply.header("cache-control", "public, max-age=3600");
+      return reply.type(file.contentType).send(file.content);
+    } catch (error) {
+      return reply.code(404).send({ error: error instanceof Error ? error.message : "Asset not found" });
+    }
+  });
+
+  // Static share viewer: serve the self-contained bundle copied at share time.
+  // No dev server — a shared scene is just files on disk.
+  app.get("/shares/:shareId", async (request, reply) => {
+    return reply.redirect(`/shares/${(request.params as { shareId: string }).shareId}/`);
+  });
+
+  app.get("/shares/:shareId/*", async (request, reply) => {
+    const { shareId } = request.params as { shareId: string };
+    const wildcard = (request.params as Record<string, string>)["*"] || "index.html";
+    const shareDir = path.join(config.shareRoot, shareId);
+    const target = path.resolve(shareDir, wildcard === "" ? "index.html" : wildcard);
+
+    if (target !== shareDir && !target.startsWith(`${shareDir}${path.sep}`)) {
+      return reply.code(403).send({ error: "Invalid path" });
+    }
+
+    try {
+      const content = await fs.readFile(target);
+      return reply.type(shareContentType(target)).send(content);
+    } catch {
+      try {
+        return reply.type("text/html; charset=utf-8").send(await fs.readFile(path.join(shareDir, "index.html")));
+      } catch {
+        return reply.code(404).send({ error: "Share not found" });
+      }
+    }
+  });
+
+  app.post("/projects", async (request, reply) => {
+    const input = createProjectSchema.parse(request.body ?? {});
+    const project = await projectRepository.createProject(input);
+
+    // New projects are Scene3D-backed: base project files (build config, entry,
+    // styles) from the template, overlaid with the shared Scene3D interpreter +
+    // a default scene. The agent and editor both operate on the Scene3D JSON.
+    const files = new Map(getTemplate(project.templateId).files.map((file) => [file.path, file.content]));
+    for (const file of createScene3DSceneFiles(defaultScene3D())) {
+      files.set(file.path, file.content);
+    }
+    for (const [filePath, content] of files) {
+      await storage.writeProjectFile(project.id, filePath, content.replaceAll("__PROJECT_NAME__", project.name));
+    }
+
+    await storage.createProjectSnapshot(project.id, "initial");
+    return reply.code(201).send({ project });
+  });
+
+  app.get("/projects/:id/scene3d", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = projectRepository.getProject(id);
+    if (!project) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
+    return { scene: await readScene3D(storage, id) };
+  });
+
+  app.put("/projects/:id/scene3d", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = projectRepository.getProject(id);
+    if (!project) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
+    const body = z.object({ scene: z.unknown() }).safeParse(request.body ?? {});
+    if (!body.success) {
+      return reply.code(400).send({ error: "A scene is required." });
+    }
+    const { scene, issues } = validateScene3D(body.data.scene);
+    // Regenerate the full source set (not just scene.config.json) so the project's
+    // copied SceneView/interpreter stays current with the package — otherwise new
+    // renderer features (e.g. image textures) work in the editor but not in the
+    // runtime preview / shared bundle. Write only changed files to avoid needless
+    // HMR reloads (an up-to-date project only rewrites scene.config.json).
+    for (const file of createScene3DSceneFiles(scene)) {
+      const existing = await storage.getProjectFile(id, file.path);
+      if (!existing || existing.content !== file.content) {
+        await storage.writeProjectFile(id, file.path, file.content);
+      }
+    }
+    await projectRepository.touchProject(id);
+    return { scene, issues };
+  });
+
+  app.get("/projects/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = projectRepository.getProject(id);
+
+    if (!project) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
+
+    return { project };
+  });
+
+  app.get("/projects/:id/files", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = projectRepository.getProject(id);
+
+    if (!project) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
+
+    const files = await storage.listProjectFiles(id);
+    return { files: files.map(({ content: _content, ...file }) => file) };
+  });
+
+  app.get("/projects/:id/files/*", async (request, reply) => {
+    const { id, "*": filePath } = request.params as { id: string; "*": string };
+    const project = projectRepository.getProject(id);
+
+    if (!project) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
+
+    const file = await storage.getProjectFile(id, filePath);
+
+    if (!file) {
+      return reply.code(404).send({ error: "File not found" });
+    }
+
+    return { file };
+  });
+
+  app.put("/projects/:id/files/*", async (request, reply) => {
+    const { id, "*": filePath } = request.params as { id: string; "*": string };
+    const project = projectRepository.getProject(id);
+
+    if (!project) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
+
+    const body = writeFileSchema.parse(request.body ?? {});
+    const file = await storage.writeProjectFile(id, filePath, body.content);
+    await projectRepository.touchProject(id);
+    return reply.code(200).send({ file });
+  });
+
+  app.get("/projects/:id/snapshots", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = projectRepository.getProject(id);
+
+    if (!project) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
+
+    const snapshots = await storage.listProjectSnapshots(id);
+    return { snapshots: snapshots.map(({ files: _files, ...snapshot }) => snapshot) };
+  });
+
+  app.post("/projects/:id/snapshots", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = projectRepository.getProject(id);
+
+    if (!project) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
+
+    const body = createSnapshotSchema.parse(request.body ?? {});
+    const snapshot = await storage.createProjectSnapshot(id, normalizeSnapshotLabel(body.label) ?? nanoid(12));
+    await projectRepository.touchProject(id);
+    return reply.code(201).send({ snapshot: { id: snapshot.id, createdAt: snapshot.createdAt } });
+  });
+
+  app.post("/projects/:id/snapshots/:snapshotId/restore", async (request, reply) => {
+    const { id, snapshotId } = request.params as { id: string; snapshotId: string };
+    const project = projectRepository.getProject(id);
+
+    if (!project) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
+
+    const snapshot = await storage.restoreProjectSnapshot(id, snapshotId);
+    await projectRepository.touchProject(id);
+    return { snapshot: { id: snapshot.id, createdAt: snapshot.createdAt } };
+  });
+
+  app.post("/projects/:id/preview/start", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = projectRepository.getProject(id);
+
+    if (!project) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
+
+    const preview = await previewRunner.start(id);
+    return { preview };
+  });
+
+  app.get("/projects/:id/preview", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = projectRepository.getProject(id);
+
+    if (!project) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
+
+    return { preview: previewRunner.get(id) };
+  });
+
+  app.post("/projects/:id/build", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = projectRepository.getProject(id);
+
+    if (!project) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
+
+    const build = await previewRunner.build(id);
+    return reply.code(build.ok ? 200 : 422).send({ build });
+  });
+
+  app.post("/projects/:id/export/source", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = projectRepository.getProject(id);
+
+    if (!project) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
+
+    const result = await projectExportService.exportSource(project);
+    return reply
+      .header("content-type", "application/zip")
+      .header("content-disposition", `attachment; filename="${result.fileName}"`)
+      .send(result.archive);
+  });
+
+  app.post("/projects/:id/export/build", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = projectRepository.getProject(id);
+
+    if (!project) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
+
+    const result = await projectExportService.exportBuild(project);
+
+    if (result.build && !result.build.ok) {
+      return reply.code(422).send({ build: result.build });
+    }
+
+    return reply
+      .header("content-type", "application/zip")
+      .header("content-disposition", `attachment; filename="${result.fileName}"`)
+      .send(result.archive);
+  });
+
+  app.post("/projects/:id/share", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = projectRepository.getProject(id);
+
+    if (!project) {
+      return reply.code(404).send({ error: "Project not found" });
+    }
+
+    // Build a self-contained static bundle (relative asset paths) and copy it to
+    // the shares directory. The shared scene renders with no dev server.
+    const build = await previewRunner.build(id, { base: "./" });
+    if (!build.ok) {
+      return reply.code(422).send({ build });
+    }
+
+    const shareId = nanoid(12);
+    const distPath = path.join(storage.getProjectRoot(id), "dist");
+    const shareDir = path.join(config.shareRoot, shareId);
+    await fs.rm(shareDir, { recursive: true, force: true });
+    await fs.mkdir(path.dirname(shareDir), { recursive: true });
+    await fs.cp(distPath, shareDir, { recursive: true });
+
+    const host = request.headers.host ?? "127.0.0.1";
+    const origin = `${request.protocol}://${host}`;
+    const share: ProjectShare = {
+      id: shareId,
+      projectId: id,
+      url: `${origin}/shares/${shareId}/`,
+      createdAt: new Date().toISOString()
+    };
+    shares.set(shareId, share);
+    return reply.code(201).send({ share });
+  });
+}
+
+async function readScene3D(storage: ProjectStorage, projectId: string) {
+  const file = await storage.getProjectFile(projectId, SCENE_CONFIG_PATH);
+  if (!file) {
+    return defaultScene3D();
+  }
+  try {
+    return validateScene3D(JSON.parse(file.content)).scene;
+  } catch {
+    return defaultScene3D();
+  }
+}
+
+function shareContentType(file: string): string {
+  if (file.endsWith(".html")) return "text/html; charset=utf-8";
+  if (file.endsWith(".js") || file.endsWith(".mjs")) return "text/javascript; charset=utf-8";
+  if (file.endsWith(".css")) return "text/css; charset=utf-8";
+  if (file.endsWith(".json")) return "application/json";
+  if (file.endsWith(".svg")) return "image/svg+xml";
+  if (file.endsWith(".png")) return "image/png";
+  if (file.endsWith(".jpg") || file.endsWith(".jpeg")) return "image/jpeg";
+  if (file.endsWith(".glb")) return "model/gltf-binary";
+  if (file.endsWith(".wasm")) return "application/wasm";
+  return "application/octet-stream";
+}
+
+function normalizeSnapshotLabel(label: string | undefined): string | null {
+  if (!label) {
+    return null;
+  }
+
+  const normalized = label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+
+  return normalized.length > 0 ? normalized : null;
+}

@@ -1,0 +1,31 @@
+{
+  "name": "@ai-threejs-studio/api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@ai-threejs-studio/rag": "workspace:*",
+    "@ai-threejs-studio/scene3d": "workspace:*",
+    "@ai-threejs-studio/shared": "workspace:*",
+    "@ai-threejs-studio/three-templates": "workspace:*",
+    "@anthropic-ai/sdk": "^0.100.1",
+    "@fastify/cors": "^10.0.1",
+    "archiver": "^8.0.0",
+    "dotenv": "^16.5.0",
+    "fastify": "^5.3.3",
+    "nanoid": "^5.1.5",
+    "pino-pretty": "^13.0.0",
+    "zod": "^3.25.42"
+  },
+  "devDependencies": {
+    "@types/archiver": "^7.0.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

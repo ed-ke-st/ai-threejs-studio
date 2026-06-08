@@ -1,0 +1,32 @@
+{
+  "name": "@ai-threejs-studio/web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "slice": "vite --host 127.0.0.1 --open /slice.html",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "lint": "tsc -p tsconfig.json --noEmit --pretty false"
+  },
+  "dependencies": {
+    "@ai-threejs-studio/scene3d": "workspace:*",
+    "@ai-threejs-studio/shared": "workspace:*",
+    "@react-three/drei": "^10.1.2",
+    "@react-three/fiber": "^9.1.2",
+    "@vitejs/plugin-react": "^4.5.0",
+    "monaco-editor": "^0.52.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "three": "^0.177.0",
+    "zustand": "^5.0.5"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.5",
+    "@types/three": "^0.177.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}

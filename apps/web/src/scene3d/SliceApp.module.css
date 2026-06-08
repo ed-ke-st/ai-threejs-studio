@@ -1,0 +1,127 @@
+.shell {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--c-bg-shell);
+  color: var(--c-text);
+  font-family: system-ui, sans-serif;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--c-border-line);
+}
+
+.title {
+  font-size: 13px;
+}
+
+.sceneName {
+  font-size: 11px;
+  color: var(--c-text-dim);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.button {
+  background: #15314c;
+  color: var(--c-text-selected);
+  border: 1px solid #1d4366;
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.button:hover {
+  background: #1a3d60;
+}
+
+.body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.panel {
+  background: var(--c-bg-panel);
+  border-left: 1px solid var(--c-border-line);
+  border-right: 1px solid var(--c-border-line);
+  padding: 12px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.panelLeft {
+  width: 200px;
+}
+
+.panelRight {
+  width: 264px;
+}
+
+.panelTitle {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #5d6b80;
+  margin-bottom: 6px;
+}
+
+.outlineRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: var(--radius);
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+  background: transparent;
+  color: #aab8cc;
+}
+
+.outlineRow:hover {
+  color: var(--c-text);
+}
+
+.outlineRowSelected {
+  background: #16314b;
+  color: var(--c-text-selected);
+}
+
+.glyph {
+  opacity: 0.6;
+  font-size: 10px;
+}
+
+.canvasMain {
+  flex: 1;
+  position: relative;
+}
+
+.jsonOverlay {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  max-height: calc(100% - 24px);
+  width: 340px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  background: rgba(6, 10, 16, 0.92);
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--radius-lg);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: #9fe8ff;
+}

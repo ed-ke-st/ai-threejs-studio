@@ -1,0 +1,864 @@
+.loading {
+  display: grid;
+  place-content: center;
+  height: 100%;
+  color: var(--c-text-dim);
+  font-size: 13px;
+}
+
+.shell {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--c-bg-shell);
+  color: var(--c-text);
+}
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid #15202f;
+}
+
+.topbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-direction: column;
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* New / Refine segmented toggle */
+.modeToggle {
+  display: flex;
+  gap: 2px;
+  background: var(--c-bg-input);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  flex: 0 0 auto;
+}
+
+.modeBtn {
+  background: transparent;
+  color: var(--c-text-muted);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.modeBtn:hover:not(.modeBtnActive) {
+  color: var(--c-text);
+}
+
+.modeBtnActive {
+  background: var(--c-accent);
+  color: var(--c-on-accent);
+}
+
+.promptInput {
+  flex: 0 1 auto;
+  background: var(--c-bg-input);
+  color: var(--c-text);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.button {
+  background: #15314c;
+  color: var(--c-text-selected);
+  border: 1px solid #1d4366;
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: #1a3d60;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ghostButton {
+  background: transparent;
+  color: var(--c-text-muted);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ghostButton:hover:not(:disabled) {
+  border-color: var(--c-accent);
+  color: var(--c-text);
+}
+
+.ghostButton:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.liveToggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--c-text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.progressPill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: #9fd0ff;
+  background: #10233a;
+  border: 1px solid #1d4366;
+  border-radius: 999px;
+  padding: 3px 11px;
+  white-space: nowrap;
+}
+
+.pulseDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #4aa3ff;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+.saveBadge {
+  font-size: 11px;
+  color: var(--c-text-muted);
+}
+
+.saveBadgeSaved {
+  color: #8fe6b0;
+}
+
+.saveBadgeError {
+  color: #ff8a8a;
+}
+
+/* Chip rows (style / mood / examples / refine target) */
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.chipLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #5d6b80;
+  margin-right: 2px;
+}
+
+.targetChip {
+  background: #16314b;
+  color: var(--c-text-selected);
+  border: 1px solid #1d4366;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+}
+
+.refineHint {
+  font-size: 11px;
+  color: #6b7c93;
+}
+
+/* Body: outliner | canvas | inspector */
+.body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.panel {
+  background: var(--c-bg-panel);
+  border-left: 1px solid #15202f;
+  border-right: 1px solid #15202f;
+  padding: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+}
+
+.panelLeft {
+  width: clamp(236px, 20vw, 320px);
+  min-width: 236px;
+  padding: .5rem .5rem 0;
+}
+
+.panelRight {
+  width: clamp(300px, 24vw, 368px);
+  min-width: 300px;
+  padding: 0;
+}
+
+/* Inspector collapsed to a narrow icon rail (desktop only — gated in JS, so this
+   class is never applied at ≤1180 where the panel is full-width). overflow:visible
+   lets the rail's hover labels spill out over the canvas without being clipped. */
+.panelRightCollapsed {
+  width: 56px;
+  min-width: 56px;
+  overflow: visible;
+}
+
+.panelRightCollapsed .inspectorPane {
+  overflow: visible;
+}
+
+.outliner {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  color: var(--c-text);
+  padding: .75rem .75rem 0;
+}
+
+.inspectorPane {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.panelTitle {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #5d6b80;
+  margin-bottom: 6px;
+}
+
+.outlinerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.outlinerHeader .panelTitle {
+  margin-bottom: 0;
+}
+
+.outlinerActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.warnChip {
+  background: #3a2a12;
+  color: #f2c14e;
+  border: 1px solid #5c451c;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.warnChip:hover {
+  border-color: #f2c14e;
+}
+
+.floatToggle {
+  background: transparent;
+  color: var(--c-text-muted);
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.floatToggle:hover {
+  color: var(--c-text);
+  border-color: #34507a;
+}
+
+.floatToggleActive {
+  background: var(--c-accent);
+  color: var(--c-on-accent);
+  border-color: var(--c-accent);
+}
+
+.warnBadge {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 11px;
+  cursor: help;
+}
+
+.warnError {
+  color: var(--c-danger);
+}
+
+.warnWarn {
+  color: #f2c14e;
+}
+
+.outlineRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: var(--radius);
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+  background: transparent;
+  color: #aab8cc;
+}
+
+.outlineRow:hover {
+  color: var(--c-text);
+}
+
+.outlineRowSelected {
+  background: #102438;
+  color: var(--c-text-selected);
+  box-shadow: inset 2px 0 0 #2b6cb0;
+}
+
+.outlineRowPrimary {
+  background: #16314b;
+  color: var(--c-text-selected);
+  box-shadow: none;
+}
+
+.glyph {
+  opacity: 0.6;
+  font-size: 10px;
+}
+
+/* Collapse chevron on group rows (and an equal-width spacer on leaf rows so
+   their glyphs line up under the group's). */
+.collapseToggle,
+.collapseSpacer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  flex: 0 0 auto;
+}
+
+.collapseToggle {
+  font-size: 9px;
+  color: var(--c-text-dim);
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.collapseToggle:hover {
+  color: var(--c-text);
+  background: #ffffff14;
+}
+
+.outlineHint {
+  font-size: 10px;
+  color: var(--c-text-muted);
+  margin-top: 6px;
+  line-height: 1.5;
+  position: sticky;
+  bottom: 0;
+  padding: .5rem;
+  backdrop-filter: blur(12px);
+}
+
+.canvasMain {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.mobileDock {
+  display: none;
+}
+
+.mobileSection {
+  min-height: 0;
+}
+
+.mobileAside {
+  min-height: 0;
+}
+
+.mobilePanelHeader {
+  display: none;
+}
+
+.mobilePanelBody {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.gizmoBar {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+  background: #0e1521cc;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  backdrop-filter: blur(4px);
+}
+
+.gizmoGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: var(--radius-md);
+}
+
+.gizmoGroupDanger {
+  background: rgba(128, 34, 34, 0.08);
+  border-color: rgba(128, 34, 34, 0.16);
+}
+
+.gizmoBtn {
+  background: transparent;
+  color: var(--c-text-muted);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gizmoBtn:hover:not(.gizmoBtnActive) {
+  color: var(--c-text);
+}
+
+.gizmoBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.gizmoBtn:disabled:hover {
+  color: var(--c-text-muted);
+}
+
+.gizmoBtnActive {
+  background: var(--c-accent);
+  color: var(--c-on-accent);
+}
+
+.gizmoIconBtn {
+  width: 32px;
+  min-width: 32px;
+  padding-inline: 0;
+}
+
+.gizmoDangerBtn:hover:not(:disabled) {
+  color: #ffb1b1;
+  background: rgba(128, 34, 34, 0.18);
+}
+
+.gizmoDivider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--c-border);
+  margin: 2px 2px;
+}
+
+/* World/Local + Snap: inline on desktop, collapsible behind ⋯ on mobile. */
+.gizmoExtras {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.gizmoMoreBtn {
+  display: none;
+}
+
+.selBadge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  background: #10233acc;
+  color: var(--c-text-selected);
+  border: 1px solid #1d4366;
+  border-radius: 999px;
+  padding: 3px 11px;
+  font-size: 11px;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+}
+
+/* Groups read as headers; per-row depth indentation is applied inline. */
+.groupNode {
+  font-weight: 600;
+}
+
+/* Tablet + mobile: one app shell from 1180px down — a non-scrolling column with a
+   fixed canvas on top, the active panel (chosen by the bottom dock) flex-filling
+   the rest and scrolling internally. The old stacking layout collapsed the
+   flex:1 panel bodies to zero height at tablet width, hiding their content. */
+@media (max-width: 1180px) {
+  .body {
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .panel {
+    border-left: none;
+    border-right: none;
+  }
+
+  .panelLeft,
+  .panelRight {
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+  }
+
+  .canvasMain {
+    order: -1;
+    flex: 0 0 44svh;
+    min-height: 0;
+  }
+
+  .mobileAsideActive {
+    flex: 1 1 0;
+    min-height: 0;
+  }
+
+  .composer {
+    gap: 8px;
+  }
+
+  .topbar {
+    align-items: stretch;
+  }
+
+  .modeToggle {
+    width: 100%;
+  }
+
+  .modeBtn {
+    flex: 1 1 0;
+  }
+
+  .promptInput {
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 112px;
+  }
+
+  .button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .outlinerHeader {
+    align-items: flex-start;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .outlinerActions {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .warnChip,
+  .floatToggle {
+    min-height: 30px;
+    padding-inline: 10px;
+  }
+
+  /* Single compact row that scrolls horizontally instead of stacking into
+     several full-width rows that ate the (already short) canvas. */
+  .gizmoBar {
+    top: 12px;
+    left: 12px;
+    right: 12px;
+    transform: none;
+    max-width: none;
+    width: auto;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .gizmoBar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .gizmoGroup {
+    flex-wrap: nowrap;
+    flex: 0 0 auto;
+  }
+
+  .mobileDock {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    /* Pinned to the bottom of the scrolling body; sits above panel content. */
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    padding: 8px 10px max(8px, env(safe-area-inset-bottom));
+    background: var(--c-bg-shell);
+    border-top: 1px solid #15202f;
+  }
+
+  .mobileSection {
+    display: none;
+  }
+
+  .mobileAside {
+    display: none;
+  }
+
+  .mobileSectionActive {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
+    min-height: 0;
+    background: linear-gradient(180deg, rgba(17, 28, 42, 0.96), rgba(10, 18, 29, 0.96));
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -10px 32px rgba(0, 0, 0, 0.28);
+    overflow: hidden;
+  }
+
+  /* The actual scroll area inside the active panel. */
+  .mobilePanelBody {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Let the outliner fill the panel rather than capping at a fixed height. */
+  .outliner {
+    max-height: none;
+  }
+
+  /* Hidden on mobile: redundant with the bottom dock (which labels the panel)
+     and the Inspector's own summary card, and the handle implied a draggable
+     sheet that doesn't exist. Reclaims vertical space on the short mobile panel. */
+  .mobilePanelHeader {
+    display: none;
+  }
+
+  .mobilePanelHandle {
+    width: 42px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.16);
+  }
+
+  .mobilePanelTitleRow {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    align-items: flex-start;
+  }
+
+  .mobilePanelTitleRow strong {
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .mobilePanelTitleRow span {
+    font-size: 11px;
+    color: var(--c-text-dim);
+  }
+
+  .mobileTab {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: var(--c-bg-input);
+    color: var(--c-text-muted);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius);
+    min-height: 42px;
+    padding: 8px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .mobileTabActive {
+    background: #16314b;
+    border-color: var(--c-accent);
+    color: var(--c-text-selected);
+  }
+
+  .mobileCount {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    font-size: 10px;
+    line-height: 1;
+  }
+
+  
+
+  .mobileAsideActive {
+    display: flex;
+  }
+
+  .selBadge {
+    top: auto;
+    bottom: 12px;
+    left: 12px;
+    max-width: calc(100% - 24px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+@media (max-width: 640px) {
+  .shell {
+    font-size: 15px;
+  }
+
+  .composer {
+    padding: 10px 10px 8px;
+  }
+
+  .panel {
+    padding: 8px;
+  }
+
+  .outliner {
+    padding: 0.5rem 0.5rem 0;
+  }
+
+  .outlineRow {
+    min-height: 44px;
+    padding-block: 10px;
+    font-size: 13px;
+  }
+
+  .collapseToggle,
+  .collapseSpacer {
+    width: 24px;
+  }
+
+  .collapseToggle {
+    font-size: 12px;
+  }
+
+  .canvasMain {
+    flex: 0 0 42svh;
+    min-height: 0;
+  }
+
+  .gizmoBar {
+    gap: 8px;
+    padding: 6px;
+  }
+
+  .gizmoGroup {
+    width: auto;
+    justify-content: center;
+  }
+
+  .gizmoDivider {
+    display: none;
+  }
+
+  .gizmoBtn:not(.gizmoIconBtn) {
+    flex: 0 0 auto;
+    min-height: 32px;
+  }
+
+  /* Compact gizmo: keep undo/redo + mode icons + delete; tuck the rest behind ⋯. */
+  .gizmoMoreBtn {
+    display: inline-flex;
+  }
+
+  .gizmoExtras {
+    display: none;
+  }
+
+  .gizmoExtrasOpen {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: 2px;
+  }
+
+  .outlineHint {
+    position: static;
+    padding-inline: 0;
+    display: none;
+  }
+
+  /* .mobileDock {
+    grid-template-columns: 1fr;
+  } */
+
+  .mobileTab {
+    justify-content: space-between;
+  }
+}

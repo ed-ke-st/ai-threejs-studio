@@ -1,0 +1,43 @@
+/* Design tokens for the dark editor surfaces. These centralize the colors and
+ * radii that were previously copy-pasted as hex literals across inline styles.
+ * Used by CSS Modules via var(--token); inline styles can read them too. */
+:root {
+  /* Surfaces — defined as RGB channels so any opacity can be derived inline,
+     e.g. rgb(var(--c-bg-panel-rgb) / 0.7). The solid tokens below are derived
+     from them, so existing `var(--c-bg-*)` usages are unchanged. */
+  --c-bg-input-rgb: 14 21 33;
+  --c-bg-panel-rgb: 11 17 27;
+  --c-bg-shell-rgb: 7 11 18;
+  --c-bg-input: rgb(var(--c-bg-input-rgb));
+  --c-bg-panel: rgb(var(--c-bg-panel-rgb));
+  --c-bg-shell: rgb(var(--c-bg-shell-rgb));
+
+  /* Translucent panel for glass/overlay surfaces — pair with backdrop-filter. */
+  --c-surface-glass: rgb(var(--c-bg-panel-rgb) / 0.55);
+
+  /* Borders */
+  --c-border: #243044;
+  --c-border-soft: #1d2738;
+  --c-border-line: #15202f;
+
+  /* Text */
+  --c-text: #e6edf6;
+  --c-text-muted: #9fb2c8;
+  --c-text-dim: #7c8aa0;
+  --c-text-selected: #cfe6ff;
+
+  /* Accent */
+  --c-accent: #1f6feb;
+  --c-on-accent: #ffffff;
+  --c-accent-cyan: #7fd1ff;
+
+  /* Status */
+  --c-success: #8fe6b0;
+  --c-danger: #ff8a8a;
+
+  /* Radii */
+  --radius-sm: 5px;
+  --radius: 6px;
+  --radius-md: 7px;
+  --radius-lg: 8px;
+}

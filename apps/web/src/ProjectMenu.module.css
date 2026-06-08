@@ -1,0 +1,193 @@
+.container {
+  position: relative;
+}
+
+.trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 200px;
+  justify-content: space-between;
+  background: var(--c-bg-input);
+  color: var(--c-text);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-lg);
+  padding: 7px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.trigger:hover {
+  border-color: #34507a;
+}
+
+.triggerLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron {
+  transition: transform 120ms;
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
+}
+
+.panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 280px;
+  background: var(--c-bg-panel);
+  border: 1px solid #223047;
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  z-index: 50;
+  overflow: hidden;
+}
+
+.createRow {
+  display: flex;
+  gap: 6px;
+  padding: 10px;
+  border-bottom: 1px solid #16202f;
+}
+
+.nameInput {
+  flex: 1;
+  background: var(--c-bg-input);
+  color: var(--c-text);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.createBtn {
+  background: var(--c-accent);
+  color: var(--c-on-accent);
+  border: none;
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.createBtn:hover:not(:disabled) {
+  background: #2f7ff5;
+}
+
+.createBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.emptyRow {
+  padding: 10px 8px;
+  color: #6b7c93;
+  font-size: 12px;
+}
+
+.rowWrap {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-md);
+  background: transparent;
+}
+
+.rowWrapActive {
+  background: #16314b;
+}
+
+.rowSelect {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: transparent;
+  color: #cdd8e6;
+  border: none;
+  padding: 8px;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.rowSelectActive {
+  color: var(--c-text-selected);
+}
+
+.rowName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #3a4658;
+  flex: 0 0 auto;
+}
+
+.dotActive {
+  background: #4aa3ff;
+  box-shadow: 0 0 6px #4aa3ff;
+}
+
+.deleteBtn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  background: transparent;
+  color: #6b7c93;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.deleteBtn:hover {
+  color: var(--c-danger);
+}
+
+@media (max-width: 640px) {
+  .container {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .trigger {
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* Anchor left and cap width so the dropdown never overflows the viewport
+     (right-anchoring a wide panel to a left-placed trigger spilled off-screen). */
+  .panel {
+    left: 0;
+    right: auto;
+    width: min(280px, calc(100vw - 24px));
+    max-height: 70svh;
+    overflow-y: auto;
+  }
+
+  .rowSelect,
+  .deleteBtn {
+    min-height: 44px;
+  }
+
+  .nameInput,
+  .createBtn {
+    min-height: 40px;
+  }
+}

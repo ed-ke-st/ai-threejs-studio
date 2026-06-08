@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "baseUrl": ".",
+    "paths": {
+      "@ai-threejs-studio/shared": ["packages/shared/src/index.ts"],
+      "@ai-threejs-studio/agent-tools": ["packages/agent-tools/src/index.ts"],
+      "@ai-threejs-studio/rag": ["packages/rag/src/index.ts"],
+      "@ai-threejs-studio/three-templates": ["packages/three-templates/src/index.ts"],
+      "@ai-threejs-studio/scene3d": ["packages/scene3d/src/index.ts"],
+      "@ai-threejs-studio/scene3d/react": ["packages/scene3d/src/react.ts"],
+      "@ai-threejs-studio/scene3d/codegen": ["packages/scene3d/src/codegen.ts"]
+    }
+  }
+}

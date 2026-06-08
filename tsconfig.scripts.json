@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": [
+    "scripts/**/*.ts",
+    "apps/api/src/**/*.ts",
+    "packages/shared/src/**/*.ts",
+    "packages/rag/src/**/*.ts",
+    "packages/three-templates/src/**/*.ts"
+  ]
+}

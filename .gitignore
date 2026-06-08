@@ -1,0 +1,40 @@
+.DS_Store
+node_modules
+dist
+*.tsbuildinfo
+.env
+.env.local
+.env.*
+!.env.example
+.turbo
+.vite
+.pnpm-store/
+
+# Local AI-tool state (not shared)
+.codex/
+.gemini/
+.claude/settings.local.json
+
+# Throwaway headless-Chrome profiles created by visual validation
+.chrome-visual-validation-*
+**/.chrome-visual-validation-*
+
+# Local logs (may contain request/response details)
+.studio/*.log
+.studio/mcp-audit.log
+.studio/projects/*
+.studio/assets/*
+.studio/snapshots/*
+.studio/shares/*
+.studio/projects.json
+.studio/settings.json
+.studio/rag-index.json
+.studio/agent-examples.json
+.studio/retrieval-tuning.json
+.studio/retrieval-recommendations.json
+.studio/retrieval-recommendations.md
+.studio/evals/*
+!.studio/projects/.gitkeep
+!.studio/assets/.gitkeep
+!.studio/snapshots/.gitkeep
+local

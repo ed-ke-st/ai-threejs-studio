@@ -1,0 +1,27 @@
+{
+  "name": "@ai-threejs-studio/scene3d",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./react": "./src/react.ts",
+    "./codegen": "./src/codegen.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "@react-three/drei": "*",
+    "@react-three/fiber": "*",
+    "react": "*",
+    "three": "*"
+  },
+  "peerDependenciesMeta": {
+    "@react-three/drei": { "optional": true },
+    "@react-three/fiber": { "optional": true },
+    "react": { "optional": true },
+    "three": { "optional": true }
+  }
+}
