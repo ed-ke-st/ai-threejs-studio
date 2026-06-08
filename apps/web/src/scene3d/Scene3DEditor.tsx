@@ -17,6 +17,7 @@ import { AddObjectMenu } from "./AddObjectMenu";
 import { createNodeFromSpec, type AddSpec } from "./sceneFactory";
 import { composePrompt } from "./promptComposer";
 import { MoveIcon, RedoIcon, RotateIcon, ScaleIcon, TrashIcon, UndoIcon } from "../ui/icons";
+import { authHeaders } from "../auth/supabaseClient";
 import styles from "./Scene3DEditor.module.css";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -94,7 +95,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   );
 
   const load = useCallback(async () => {
-    const response = await fetch(`/api/projects/${projectId}/scene3d`);
+    const response = await fetch(`/api/projects/${projectId}/scene3d`, { headers: await authHeaders() });
     if (!response.ok) {
       setSaveState("error");
       return;
@@ -138,7 +139,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
       try {
         const response = await fetch(`/api/projects/${projectId}/scene3d`, {
           method: "PUT",
-          headers: { "content-type": "application/json" },
+          headers: { "content-type": "application/json", ...(await authHeaders()) },
           body: JSON.stringify({ scene: next })
         });
         setSaveState(response.ok ? "saved" : "error");
@@ -301,7 +302,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     try {
       const response = await fetch(`/api/projects/${projectId}/scene3d/agent-run`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...(await authHeaders()) },
         body: JSON.stringify({
           prompt: composed,
           mode,

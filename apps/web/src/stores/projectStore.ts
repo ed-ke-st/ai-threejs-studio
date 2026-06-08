@@ -7,6 +7,7 @@ import type {
   ProjectShare
 } from "@ai-threejs-studio/shared";
 import { create } from "zustand";
+import { authHeaders, supabase } from "../auth/supabaseClient";
 
 // Lean, Scene3D-centric store. The scene document itself (load/edit/generate) is
 // owned by the Scene3DEditor component talking to /scene3d; this store handles
@@ -194,8 +195,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   }
 }));
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api${path}`, init);
+async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(`/api${path}`, {
+    ...init,
+    headers: { ...(await authHeaders()), ...init.headers }
+  });
+  if (response.status === 401) {
+    await supabase?.auth.signOut();
+    throw new Error("Session expired");
+  }
   if (!response.ok) {
     throw new Error(`API request failed: ${response.status}`);
   }
@@ -203,7 +211,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function downloadProjectArchive(url: string, fallbackFileName: string): Promise<{ build?: BuildResult }> {
-  const response = await fetch(url, { method: "POST" });
+  const response = await fetch(url, { method: "POST", headers: await authHeaders() });
   if (!response.ok) {
     const data = (await response.json().catch(() => ({}))) as { build?: BuildResult };
     if (data.build) {

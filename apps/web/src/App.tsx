@@ -4,6 +4,7 @@ import { Scene3DEditor } from "./scene3d/Scene3DEditor";
 import { ProjectMenu } from "./ProjectMenu";
 import { ProjectToolbar } from "./ProjectToolbar";
 import { CloseIcon, SettingsIcon } from "./ui/icons";
+import { authEnabled, supabase } from "./auth/supabaseClient";
 import styles from "./App.module.css";
 
 export function App() {
@@ -65,6 +66,11 @@ export function App() {
           <button className={styles.ghost} onClick={() => setShowSettings((v) => !v)}>
             {showSettings ? <CloseIcon /> : <SettingsIcon />}
           </button>
+          {authEnabled ? (
+            <button className={styles.ghost} onClick={() => void supabase?.auth.signOut()}>
+              Sign out
+            </button>
+          ) : null}
         </div>
       </header>
 
