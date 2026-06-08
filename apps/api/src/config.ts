@@ -6,6 +6,15 @@ export const repoRoot = findRepoRoot(path.resolve(new URL("../../..", import.met
 
 loadEnv({ path: path.join(repoRoot, ".env") });
 
+// Accounts/auth. When both a Supabase URL and a Postgres connection string are
+// present the API runs multi-tenant: it verifies Supabase JWTs and stores project
+// metadata in Postgres. Otherwise it runs single-tenant (the original behavior),
+// where every request acts as one constant local owner and metadata lives in the
+// local JSON index. This keeps the app working with no Supabase setup.
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseDbUrl = process.env.SUPABASE_DB_URL;
+const authEnabled = Boolean(supabaseUrl && supabaseDbUrl);
+
 export const config = {
   host: process.env.API_HOST ?? "127.0.0.1",
   port: Number(process.env.API_PORT ?? 4000),
@@ -39,6 +48,17 @@ export const config = {
   anthropicMaxTokens: Number(process.env.ANTHROPIC_MAX_TOKENS ?? 16_000),
   modelRequestTimeoutMs: Number(process.env.MODEL_REQUEST_TIMEOUT_MS ?? 90_000),
   maxAgentFixAttempts: Number(process.env.MAX_AGENT_FIX_ATTEMPTS ?? 3),
+  auth: {
+    enabled: authEnabled,
+    supabaseUrl,
+    // Newer Supabase projects sign access tokens asymmetrically; verify via JWKS.
+    supabaseJwksUrl: supabaseUrl ? `${supabaseUrl}/auth/v1/.well-known/jwks.json` : undefined,
+    // Legacy HS256 fallback for older projects.
+    supabaseJwtSecret: process.env.SUPABASE_JWT_SECRET,
+    // The implicit owner of all projects when auth is disabled (single-tenant).
+    localOwnerId: process.env.LOCAL_OWNER_ID ?? "local-owner"
+  },
+  supabaseDbUrl,
   projectIndexPath: path.resolve(repoRoot, ".studio/projects.json"),
   settingsPath: path.resolve(repoRoot, ".studio/settings.json"),
   workspaceRoot: path.resolve(repoRoot, process.env.STUDIO_WORKSPACE_ROOT ?? ".studio/projects"),

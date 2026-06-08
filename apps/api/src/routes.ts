@@ -3,7 +3,7 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import type { FastifyInstance } from "fastify";
 import { getTemplate } from "@ai-threejs-studio/three-templates";
-import type { AppSettingsUpdate, ProjectShare } from "@ai-threejs-studio/shared";
+import type { AppSettingsUpdate, Project, ProjectShare } from "@ai-threejs-studio/shared";
 import { z } from "zod";
 import { createScene3DSceneFiles, defaultScene3D } from "@ai-threejs-studio/scene3d/codegen";
 import { SCENE_CONFIG_PATH, validateScene3D } from "@ai-threejs-studio/scene3d";
@@ -13,7 +13,7 @@ import { Scene3DGenerator, type SceneGenerator } from "./agent/scene3dGenerator.
 import { ClaudeSceneGenerator } from "./agent/claudeSceneGenerator.js";
 import type { ProjectAssetLibrary } from "./assets/projectAssetLibrary.js";
 import type { ProjectExportService } from "./export/projectExport.js";
-import type { LocalProjectRepository } from "./projects.js";
+import type { ProjectRepository } from "./projects.js";
 import type { LocalSettingsRepository } from "./settings.js";
 import type { PreviewRunner } from "./preview/previewRunner.js";
 import type { LocalRagService } from "./rag/localRagService.js";
@@ -125,7 +125,7 @@ const appSettingsSchema = z.object({
 export function registerRoutes(
   app: FastifyInstance,
   storage: ProjectStorage,
-  projectRepository: LocalProjectRepository,
+  projectRepository: ProjectRepository,
   previewRunner: PreviewRunner,
   ragService: LocalRagService,
   projectExportService: ProjectExportService,
@@ -133,6 +133,22 @@ export function registerRoutes(
   settingsRepository: LocalSettingsRepository
 ): void {
   const shares = new Map<string, ProjectShare>();
+
+  // Loads a project and enforces ownership. On a missing OR not-owned project it
+  // sends 404 (not 403, so project ids aren't probeable) and returns null — the
+  // caller should `if (!project) return;`.
+  async function requireOwnedProject(
+    request: { userId: string },
+    reply: import("fastify").FastifyReply,
+    id: string
+  ): Promise<Project | null> {
+    const project = await projectRepository.getProject(id);
+    if (!project || project.ownerId !== request.userId) {
+      reply.code(404).send({ error: "Project not found" });
+      return null;
+    }
+    return project;
+  }
 
   app.get("/health", async () => ({
     ok: true,
@@ -144,10 +160,8 @@ export function registerRoutes(
   // repair. Writes the Scene3D-backed source set (shared interpreter + config).
   app.post("/projects/:id/scene3d/agent-run", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const project = projectRepository.getProject(id);
-    if (!project) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
+    const project = await requireOwnedProject(request, reply, id);
+    if (!project) return;
     const body = z
       .object({
         prompt: z.string().min(1),
@@ -225,17 +239,15 @@ export function registerRoutes(
     }
   });
 
-  app.get("/projects", async () => ({
-    projects: projectRepository.listProjects()
+  app.get("/projects", async (request) => ({
+    projects: await projectRepository.listProjects(request.userId)
   }));
 
   app.delete("/projects/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const project = projectRepository.getProject(id);
+    const project = await requireOwnedProject(request, reply, id);
 
-    if (!project) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
+    if (!project) return;
 
     previewRunner.stop(id);
     await storage.deleteProject(id);
@@ -257,22 +269,22 @@ export function registerRoutes(
 
   app.post("/docs/search", async (request) => {
     const body = searchDocsSchema.parse(request.body ?? {});
-    const project = body.projectId ? projectRepository.getProject(body.projectId) : null;
+    // Only use the project for retrieval context if the caller owns it.
+    const project = body.projectId ? await projectRepository.getProject(body.projectId) : null;
+    const owned = project && project.ownerId === request.userId ? project : null;
     const chunks = await ragService.searchDocs({
       ...body,
-      projectName: project?.name,
-      templateId: project?.templateId
+      projectName: owned?.name,
+      templateId: owned?.templateId
     });
     return { chunks };
   });
 
   app.get("/projects/:id/assets", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const project = projectRepository.getProject(id);
+    const project = await requireOwnedProject(request, reply, id);
 
-    if (!project) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
+    if (!project) return;
 
     return {
       assets: await assetLibrary.listProjectAssets(id)
@@ -281,11 +293,9 @@ export function registerRoutes(
 
   app.post("/projects/:id/assets/upload", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const project = projectRepository.getProject(id);
+    const project = await requireOwnedProject(request, reply, id);
 
-    if (!project) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
+    if (!project) return;
 
     const body = uploadAssetSchema.parse(request.body ?? {});
 
@@ -305,6 +315,8 @@ export function registerRoutes(
 
   app.get("/projects/:id/assets/:assetId/content", async (request, reply) => {
     const { id, assetId } = request.params as { id: string; assetId: string };
+    const project = await requireOwnedProject(request, reply, id);
+    if (!project) return;
 
     try {
       const file = await assetLibrary.readProjectAssetContent(id, assetId);
@@ -345,7 +357,7 @@ export function registerRoutes(
 
   app.post("/projects", async (request, reply) => {
     const input = createProjectSchema.parse(request.body ?? {});
-    const project = await projectRepository.createProject(input);
+    const project = await projectRepository.createProject({ ...input, ownerId: request.userId });
 
     // New projects are Scene3D-backed: base project files (build config, entry,
     // styles) from the template, overlaid with the shared Scene3D interpreter +
@@ -364,19 +376,15 @@ export function registerRoutes(
 
   app.get("/projects/:id/scene3d", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const project = projectRepository.getProject(id);
-    if (!project) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
+    const project = await requireOwnedProject(request, reply, id);
+    if (!project) return;
     return { scene: await readScene3D(storage, id) };
   });
 
   app.put("/projects/:id/scene3d", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const project = projectRepository.getProject(id);
-    if (!project) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
+    const project = await requireOwnedProject(request, reply, id);
+    if (!project) return;
     const body = z.object({ scene: z.unknown() }).safeParse(request.body ?? {});
     if (!body.success) {
       return reply.code(400).send({ error: "A scene is required." });
@@ -399,22 +407,18 @@ export function registerRoutes(
 
   app.get("/projects/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const project = projectRepository.getProject(id);
+    const project = await requireOwnedProject(request, reply, id);
 
-    if (!project) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
+    if (!project) return;
 
     return { project };
   });
 
   app.get("/projects/:id/files", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const project = projectRepository.getProject(id);
+    const project = await requireOwnedProject(request, reply, id);
 
-    if (!project) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
+    if (!project) return;
 
     const files = await storage.listProjectFiles(id);
     return { files: files.map(({ content: _content, ...file }) => file) };
@@ -422,11 +426,9 @@ export function registerRoutes(
 
   app.get("/projects/:id/files/*", async (request, reply) => {
     const { id, "*": filePath } = request.params as { id: string; "*": string };
-    const project = projectRepository.getProject(id);
+    const project = await requireOwnedProject(request, reply, id);
 
-    if (!project) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
+    if (!project) return;
 
     const file = await storage.getProjectFile(id, filePath);
 
@@ -439,11 +441,9 @@ export function registerRoutes(
 
   app.put("/projects/:id/files/*", async (request, reply) => {
     const { id, "*": filePath } = request.params as { id: string; "*": string };
-    const project = projectRepository.getProject(id);
+    const project = await requireOwnedProject(request, reply, id);
 
-    if (!project) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
+    if (!project) return;
 
     const body = writeFileSchema.parse(request.body ?? {});
     const file = await storage.writeProjectFile(id, filePath, body.content);
@@ -453,11 +453,9 @@ export function registerRoutes(
 
   app.get("/projects/:id/snapshots", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const project = projectRepository.getProject(id);
+    const project = await requireOwnedProject(request, reply, id);
 
-    if (!project) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
+    if (!project) return;
 
     const snapshots = await storage.listProjectSnapshots(id);
     return { snapshots: snapshots.map(({ files: _files, ...snapshot }) => snapshot) };
@@ -465,11 +463,9 @@ export function registerRoutes(
 
   app.post("/projects/:id/snapshots", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const project = projectRepository.getProject(id);
+    const project = await requireOwnedProject(request, reply, id);
 
-    if (!project) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
+    if (!project) return;
 
     const body = createSnapshotSchema.parse(request.body ?? {});
     const snapshot = await storage.createProjectSnapshot(id, normalizeSnapshotLabel(body.label) ?? nanoid(12));
@@ -479,11 +475,9 @@ export function registerRoutes(
 
   app.post("/projects/:id/snapshots/:snapshotId/restore", async (request, reply) => {
     const { id, snapshotId } = request.params as { id: string; snapshotId: string };
-    const project = projectRepository.getProject(id);
+    const project = await requireOwnedProject(request, reply, id);
 
-    if (!project) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
+    if (!project) return;
 
     const snapshot = await storage.restoreProjectSnapshot(id, snapshotId);
     await projectRepository.touchProject(id);
@@ -492,11 +486,9 @@ export function registerRoutes(
 
   app.post("/projects/:id/preview/start", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const project = projectRepository.getProject(id);
+    const project = await requireOwnedProject(request, reply, id);
 
-    if (!project) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
+    if (!project) return;
 
     const preview = await previewRunner.start(id);
     return { preview };
@@ -504,22 +496,18 @@ export function registerRoutes(
 
   app.get("/projects/:id/preview", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const project = projectRepository.getProject(id);
+    const project = await requireOwnedProject(request, reply, id);
 
-    if (!project) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
+    if (!project) return;
 
     return { preview: previewRunner.get(id) };
   });
 
   app.post("/projects/:id/build", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const project = projectRepository.getProject(id);
+    const project = await requireOwnedProject(request, reply, id);
 
-    if (!project) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
+    if (!project) return;
 
     const build = await previewRunner.build(id);
     return reply.code(build.ok ? 200 : 422).send({ build });
@@ -527,11 +515,9 @@ export function registerRoutes(
 
   app.post("/projects/:id/export/source", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const project = projectRepository.getProject(id);
+    const project = await requireOwnedProject(request, reply, id);
 
-    if (!project) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
+    if (!project) return;
 
     const result = await projectExportService.exportSource(project);
     return reply
@@ -542,11 +528,9 @@ export function registerRoutes(
 
   app.post("/projects/:id/export/build", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const project = projectRepository.getProject(id);
+    const project = await requireOwnedProject(request, reply, id);
 
-    if (!project) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
+    if (!project) return;
 
     const result = await projectExportService.exportBuild(project);
 
@@ -562,11 +546,9 @@ export function registerRoutes(
 
   app.post("/projects/:id/share", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const project = projectRepository.getProject(id);
+    const project = await requireOwnedProject(request, reply, id);
 
-    if (!project) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
+    if (!project) return;
 
     // Build a self-contained static bundle (relative asset paths) and copy it to
     // the shares directory. The shared scene renders with no dev server.
