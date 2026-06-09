@@ -1,6 +1,6 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
-import { config } from "./config.js";
+import { config, validateConfig } from "./config.js";
 import { ProjectAssetLibrary } from "./assets/projectAssetLibrary.js";
 import { ProjectExportService } from "./export/projectExport.js";
 import { createProjectRepository } from "./projects.js";
@@ -29,6 +29,11 @@ const app = Fastify({
           }
   }
 });
+
+// Fail fast on a half-configured accounts setup; log soft misconfigurations.
+for (const warning of validateConfig()) {
+  app.log.warn(warning);
+}
 
 await app.register(cors, {
   origin: true

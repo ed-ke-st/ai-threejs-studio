@@ -75,6 +75,37 @@ export const config = {
   retrievalTuningPath: path.resolve(repoRoot, process.env.STUDIO_RETRIEVAL_TUNING ?? ".studio/retrieval-tuning.json")
 };
 
+/**
+ * Fails fast on a half-configured accounts setup (the most common multi-tenant
+ * footgun) and surfaces soft misconfigurations as warnings. Call at startup.
+ * Returns warning strings; throws on a hard misconfiguration.
+ */
+export function validateConfig(): string[] {
+  const warnings: string[] = [];
+  const hasUrl = Boolean(supabaseUrl);
+  const hasDb = Boolean(supabaseDbUrl);
+
+  if (hasUrl !== hasDb) {
+    warnings.push(
+      `Partial Supabase config: ${hasUrl ? "SUPABASE_URL is set but SUPABASE_DB_URL is missing" : "SUPABASE_DB_URL is set but SUPABASE_URL is missing"}. ` +
+        "Running SINGLE-TENANT — set BOTH to enable accounts."
+    );
+  }
+
+  if (authEnabled && !process.env.SETTINGS_ENC_KEY) {
+    throw new Error(
+      "Accounts are enabled (SUPABASE_URL + SUPABASE_DB_URL) but SETTINGS_ENC_KEY is missing. " +
+        "It encrypts per-user provider keys at rest. Generate one with `openssl rand -hex 32`."
+    );
+  }
+
+  if (authEnabled && !config.auth.supabaseJwksUrl && !config.auth.supabaseJwtSecret) {
+    throw new Error("Accounts are enabled but no JWT verification source is available (need SUPABASE_URL for JWKS).");
+  }
+
+  return warnings;
+}
+
 function findRepoRoot(startPath: string): string {
   let currentPath = startPath;
 
