@@ -14,6 +14,8 @@ dist
 .codex/
 .gemini/
 .claude/settings.local.json
+.claude/
+.github/
 
 # Throwaway headless-Chrome profiles created by visual validation
 .chrome-visual-validation-*
