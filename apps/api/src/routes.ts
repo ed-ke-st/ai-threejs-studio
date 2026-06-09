@@ -15,6 +15,7 @@ import type { ProjectAssetLibrary } from "./assets/projectAssetLibrary.js";
 import type { ProjectExportService } from "./export/projectExport.js";
 import type { ProjectRepository } from "./projects.js";
 import type { SettingsRepository } from "./settings.js";
+import type { QuotaStatus, UsageService } from "./usage.js";
 import type { PreviewRunner } from "./preview/previewRunner.js";
 import type { LocalRagService } from "./rag/localRagService.js";
 import type { ProjectStorage } from "./storage/localWorkspaceStorage.js";
@@ -130,7 +131,8 @@ export function registerRoutes(
   ragService: LocalRagService,
   projectExportService: ProjectExportService,
   assetLibrary: ProjectAssetLibrary,
-  settingsRepository: SettingsRepository
+  settingsRepository: SettingsRepository,
+  usageService: UsageService
 ): void {
   const shares = new Map<string, ProjectShare>();
 
@@ -204,6 +206,13 @@ export function registerRoutes(
       return reply.code(400).send({ error: useClaude ? "No Anthropic API key is configured." : "No OpenAI API key is configured." });
     }
 
+    // Per-user daily quota (no-op single-tenant). Counts the attempt before the
+    // expensive run; must happen before reply.hijack() so we can still send 429.
+    const quota = await usageService.consume(request.userId, "agentRun");
+    if (!quota.allowed) {
+      return reply.code(429).send({ error: `Daily generation limit reached (${quota.limit}/day). Try again tomorrow.` });
+    }
+
     const retrievedContext = await ragService.searchDocs({
       query: body.data.prompt,
       limit: 6,
@@ -269,6 +278,13 @@ export function registerRoutes(
     const body = appSettingsSchema.parse(request.body ?? {}) as AppSettingsUpdate;
     const settings = await settingsRepository.updateSettings(request.userId, body);
     return { settings };
+  });
+
+  // Today's per-user usage vs limits (null limit = unlimited / single-tenant).
+  app.get("/usage", async (request) => {
+    const usage = await usageService.status(request.userId);
+    const clean = (s: QuotaStatus) => ({ used: s.used, limit: Number.isFinite(s.limit) ? s.limit : null, allowed: s.allowed });
+    return { usage: { agentRun: clean(usage.agentRun), build: clean(usage.build) } };
   });
 
   app.post("/docs/search", async (request) => {
@@ -512,6 +528,11 @@ export function registerRoutes(
     const project = await requireOwnedProject(request, reply, id);
 
     if (!project) return;
+
+    const quota = await usageService.consume(request.userId, "build");
+    if (!quota.allowed) {
+      return reply.code(429).send({ error: `Daily build limit reached (${quota.limit}/day). Try again tomorrow.` });
+    }
 
     const build = await previewRunner.build(id);
     return reply.code(build.ok ? 200 : 422).send({ build });

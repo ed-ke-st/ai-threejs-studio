@@ -6,6 +6,7 @@ import { ProjectExportService } from "./export/projectExport.js";
 import { createProjectRepository } from "./projects.js";
 import { registerAuth } from "./auth/supabaseAuth.js";
 import { createSettingsRepository } from "./settings.js";
+import { createUsageService } from "./usage.js";
 import { closeSql } from "./db.js";
 import { PreviewRunner } from "./preview/previewRunner.js";
 import { LocalRagService } from "./rag/localRagService.js";
@@ -44,6 +45,7 @@ await app.register(cors, {
 registerAuth(app);
 
 const settingsRepository = await createSettingsRepository();
+const usageService = createUsageService();
 
 const projectRepository = await createProjectRepository();
 const ragService = new LocalRagService(config.ragIndexPath, config.agentExampleBankPath, config.retrievalTuningPath);
@@ -67,7 +69,8 @@ registerRoutes(
   ragService,
   projectExportService,
   assetLibrary,
-  settingsRepository
+  settingsRepository,
+  usageService
 );
 
 process.once("SIGINT", () => {

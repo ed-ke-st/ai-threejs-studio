@@ -64,6 +64,12 @@ export const config = {
   supabaseDbUrl,
   // Secret that encrypts per-user provider keys at rest (required when auth is on).
   settingsEncKey: process.env.SETTINGS_ENC_KEY,
+  // Per-user daily quotas (multi-tenant only). Protect server resources now, and
+  // become the cost cap if platform/test tokens are ever enabled. <= 0 = unlimited.
+  quota: {
+    agentRunsPerDay: Number(process.env.QUOTA_AGENT_RUNS_PER_DAY ?? 100),
+    buildsPerDay: Number(process.env.QUOTA_BUILDS_PER_DAY ?? 200)
+  },
   projectIndexPath: path.resolve(repoRoot, ".studio/projects.json"),
   settingsPath: path.resolve(repoRoot, ".studio/settings.json"),
   workspaceRoot: path.resolve(repoRoot, process.env.STUDIO_WORKSPACE_ROOT ?? ".studio/projects"),
