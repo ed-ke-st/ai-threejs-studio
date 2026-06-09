@@ -5,7 +5,8 @@ import { ProjectAssetLibrary } from "./assets/projectAssetLibrary.js";
 import { ProjectExportService } from "./export/projectExport.js";
 import { createProjectRepository } from "./projects.js";
 import { registerAuth } from "./auth/supabaseAuth.js";
-import { LocalSettingsRepository } from "./settings.js";
+import { createSettingsRepository } from "./settings.js";
+import { closeSql } from "./db.js";
 import { PreviewRunner } from "./preview/previewRunner.js";
 import { LocalRagService } from "./rag/localRagService.js";
 import { registerRoutes } from "./routes.js";
@@ -37,8 +38,7 @@ await app.register(cors, {
 // otherwise). Must run before the routes so ownership checks have a user.
 registerAuth(app);
 
-const settingsRepository = new LocalSettingsRepository(config.settingsPath);
-await settingsRepository.load();
+const settingsRepository = await createSettingsRepository();
 
 const projectRepository = await createProjectRepository();
 const ragService = new LocalRagService(config.ragIndexPath, config.agentExampleBankPath, config.retrievalTuningPath);
@@ -68,12 +68,14 @@ registerRoutes(
 process.once("SIGINT", () => {
   previewRunner.stopAll();
   void projectRepository.close();
+  void closeSql();
   process.exit(0);
 });
 
 process.once("SIGTERM", () => {
   previewRunner.stopAll();
   void projectRepository.close();
+  void closeSql();
   process.exit(0);
 });
 

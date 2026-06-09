@@ -1,9 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { nanoid } from "nanoid";
-import postgres from "postgres";
+import type postgres from "postgres";
 import type { Project, ProjectTemplateId } from "@ai-threejs-studio/shared";
 import { config } from "./config.js";
+import { getSql } from "./db.js";
 
 export interface CreateProjectInput {
   name: string;
@@ -138,11 +139,7 @@ function toProject(row: ProjectRow): Project {
 
 /** Multi-tenant repo backed by Supabase Postgres. Ownership is enforced by callers. */
 export class PostgresProjectRepository implements ProjectRepository {
-  private readonly sql: postgres.Sql;
-
-  constructor(connectionString: string) {
-    this.sql = postgres(connectionString, { ssl: "require", max: 10 });
-  }
+  constructor(private readonly sql: postgres.Sql) {}
 
   async load(): Promise<void> {
     await this.sql`select 1`;
@@ -185,7 +182,7 @@ export class PostgresProjectRepository implements ProjectRepository {
   }
 
   async close(): Promise<void> {
-    await this.sql.end();
+    // The shared pool is closed centrally via closeSql().
   }
 }
 
@@ -193,7 +190,7 @@ export class PostgresProjectRepository implements ProjectRepository {
 export async function createProjectRepository(): Promise<ProjectRepository> {
   const repository: ProjectRepository =
     config.auth.enabled && config.supabaseDbUrl
-      ? new PostgresProjectRepository(config.supabaseDbUrl)
+      ? new PostgresProjectRepository(getSql())
       : new LocalProjectRepository(config.projectIndexPath, config.auth.localOwnerId);
   await repository.load();
   return repository;

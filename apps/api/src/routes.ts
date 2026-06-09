@@ -14,7 +14,7 @@ import { ClaudeSceneGenerator } from "./agent/claudeSceneGenerator.js";
 import type { ProjectAssetLibrary } from "./assets/projectAssetLibrary.js";
 import type { ProjectExportService } from "./export/projectExport.js";
 import type { ProjectRepository } from "./projects.js";
-import type { LocalSettingsRepository } from "./settings.js";
+import type { SettingsRepository } from "./settings.js";
 import type { PreviewRunner } from "./preview/previewRunner.js";
 import type { LocalRagService } from "./rag/localRagService.js";
 import type { ProjectStorage } from "./storage/localWorkspaceStorage.js";
@@ -130,7 +130,7 @@ export function registerRoutes(
   ragService: LocalRagService,
   projectExportService: ProjectExportService,
   assetLibrary: ProjectAssetLibrary,
-  settingsRepository: LocalSettingsRepository
+  settingsRepository: SettingsRepository
 ): void {
   const shares = new Map<string, ProjectShare>();
 
@@ -174,7 +174,7 @@ export function registerRoutes(
       return reply.code(400).send({ error: "A prompt is required." });
     }
 
-    const settings = settingsRepository.getStoredSettings();
+    const settings = await settingsRepository.getStoredSettings(request.userId);
     const openAiKey = settings.openAiApiKey || config.openAiApiKey;
     const anthropicKey = settings.anthropicApiKey || config.anthropicApiKey;
     // Resolve the provider: explicit setting wins; "auto"/"gemini" falls back to
@@ -257,13 +257,13 @@ export function registerRoutes(
     return reply.code(204).send();
   });
 
-  app.get("/settings", async () => {
-    return { settings: settingsRepository.getSettings() };
+  app.get("/settings", async (request) => {
+    return { settings: await settingsRepository.getSettings(request.userId) };
   });
 
   app.put("/settings", async (request) => {
     const body = appSettingsSchema.parse(request.body ?? {}) as AppSettingsUpdate;
-    const settings = await settingsRepository.updateSettings(body);
+    const settings = await settingsRepository.updateSettings(request.userId, body);
     return { settings };
   });
 

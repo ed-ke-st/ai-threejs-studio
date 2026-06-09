@@ -56,9 +56,14 @@ export const config = {
     // Legacy HS256 fallback for older projects.
     supabaseJwtSecret: process.env.SUPABASE_JWT_SECRET,
     // The implicit owner of all projects when auth is disabled (single-tenant).
-    localOwnerId: process.env.LOCAL_OWNER_ID ?? "local-owner"
+    localOwnerId: process.env.LOCAL_OWNER_ID ?? "local-owner",
+    // When true, users without their own provider key fall back to the platform
+    // env keys (otherwise BYO-only). Pairs with usage metering (Phase 5).
+    allowPlatformKeys: process.env.ALLOW_PLATFORM_KEYS === "true"
   },
   supabaseDbUrl,
+  // Secret that encrypts per-user provider keys at rest (required when auth is on).
+  settingsEncKey: process.env.SETTINGS_ENC_KEY,
   projectIndexPath: path.resolve(repoRoot, ".studio/projects.json"),
   settingsPath: path.resolve(repoRoot, ".studio/settings.json"),
   workspaceRoot: path.resolve(repoRoot, process.env.STUDIO_WORKSPACE_ROOT ?? ".studio/projects"),
