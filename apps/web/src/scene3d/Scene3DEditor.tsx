@@ -18,6 +18,7 @@ import { createNodeFromSpec, type AddSpec } from "./sceneFactory";
 import { composePrompt } from "./promptComposer";
 import { MoveIcon, RedoIcon, RotateIcon, ScaleIcon, TrashIcon, UndoIcon } from "../ui/icons";
 import { authHeaders } from "../auth/supabaseClient";
+import { useProjectStore } from "../stores/projectStore";
 import styles from "./Scene3DEditor.module.css";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -42,6 +43,9 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   const [modifierIds, setModifierIds] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
   const [stage, setStage] = useState("");
+  const [agentError, setAgentError] = useState<string | null>(null);
+  const usage = useProjectStore((s) => s.usage);
+  const loadUsage = useProjectStore((s) => s.loadUsage);
   const [liveBuild, setLiveBuild] = useState(true);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
@@ -292,6 +296,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     // Live build-up streams nodes in as the AI writes them — best for NEW scenes.
     const streaming = liveBuild && mode === "new";
     setGenerating(true);
+    setAgentError(null);
     setStage(mode === "refine" ? "Refining the scene" : "Designing the scene");
     setSaveState("saving");
     if (scene) recordHistory(scene, true); // standalone undo entry for the generate
@@ -310,6 +315,17 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
           stream: streaming
         })
       });
+
+      // Non-OK (e.g. 429 quota, 400 no key) returns a JSON {error}, not a stream.
+      if (!response.ok) {
+        const message = await response
+          .json()
+          .then((body: { error?: string }) => body?.error)
+          .catch(() => null);
+        setAgentError(message || `Generation failed (${response.status}).`);
+        setSaveState("error");
+        return;
+      }
 
       // Read the newline-delimited stream: progress | partial-node | result | error.
       let result: { scene: Scene3D } | null = null;
@@ -351,8 +367,9 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     } finally {
       setGenerating(false);
       setStage("");
+      void loadUsage(); // reflect the consumed (or blocked) generation
     }
-  }, [projectId, prompt, mode, liveBuild, primaryId, styleId, modifierIds, scene, recordHistory]);
+  }, [projectId, prompt, mode, liveBuild, primaryId, styleId, modifierIds, scene, recordHistory, loadUsage]);
 
   const deleteSelected = useCallback(() => {
     const prev = sceneRef.current;
@@ -556,6 +573,11 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
                 </button>
 
                 <span className={styles.spacer} />
+                {usage && usage.agentRun.limit != null ? (
+                  <span className={styles.usageHint}>
+                    {Math.max(0, usage.agentRun.limit - usage.agentRun.used)}/{usage.agentRun.limit} generations left today
+                  </span>
+                ) : null}
                 {generating && stage ? (
                   <span className={styles.progressPill}>
                     <span className={styles.pulseDot} />
@@ -565,6 +587,8 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
                   <span className={saveBadgeClass(saveState)}>{saveLabel(saveState)}</span>
                 )}
               </div>
+
+              {agentError ? <div className={styles.agentError}>{agentError}</div> : null}
 
               {mode === "new" ? (
                 <ComposerControls

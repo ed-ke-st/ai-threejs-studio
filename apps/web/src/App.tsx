@@ -21,6 +21,7 @@ export function App() {
   const checkHealth = useProjectStore((s) => s.checkHealth);
   const loadProjects = useProjectStore((s) => s.loadProjects);
   const loadSettings = useProjectStore((s) => s.loadSettings);
+  const loadUsage = useProjectStore((s) => s.loadUsage);
   const createProject = useProjectStore((s) => s.createProject);
   const startPreview = useProjectStore((s) => s.startPreview);
 
@@ -30,7 +31,8 @@ export function App() {
     void checkHealth();
     void loadProjects();
     void loadSettings();
-  }, [checkHealth, loadProjects, loadSettings]);
+    void loadUsage();
+  }, [checkHealth, loadProjects, loadSettings, loadUsage]);
 
   // Auto-start the preview when the Runtime surface is opened with no running
   // preview. The ref guards against retry storms if a start fails (it resets when
