@@ -40,6 +40,20 @@ export function registerAuth(app: FastifyInstance): void {
     issuer: `${config.auth.supabaseUrl}/auth/v1`
   };
 
+  // Prefer JWKS (asymmetric signing keys). If that can't verify the token and a
+  // legacy HS256 secret is configured, fall back to it — so the API works whether
+  // the project uses the new signing keys or the legacy shared secret.
+  async function verifyToken(token: string) {
+    if (jwks) {
+      try {
+        return await jwtVerify(token, jwks, verifyOptions);
+      } catch (error) {
+        if (!hsSecret) throw error;
+      }
+    }
+    return jwtVerify(token, hsSecret!, verifyOptions);
+  }
+
   app.addHook("preHandler", async (request: FastifyRequest, reply: FastifyReply) => {
     if (isPublic(request.url)) return;
 
@@ -50,9 +64,7 @@ export function registerAuth(app: FastifyInstance): void {
     }
 
     try {
-      const { payload } = jwks
-        ? await jwtVerify(token, jwks, verifyOptions)
-        : await jwtVerify(token, hsSecret!, verifyOptions);
+      const { payload } = await verifyToken(token);
       if (!payload.sub) {
         return reply.code(401).send({ error: "Invalid token: missing subject" });
       }

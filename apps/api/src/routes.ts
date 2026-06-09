@@ -175,8 +175,12 @@ export function registerRoutes(
     }
 
     const settings = await settingsRepository.getStoredSettings(request.userId);
-    const openAiKey = settings.openAiApiKey || config.openAiApiKey;
-    const anthropicKey = settings.anthropicApiKey || config.anthropicApiKey;
+    // Keys come resolved from the settings repo: single-tenant merges env keys;
+    // multi-tenant returns the user's own keys (plus the platform env keys only
+    // when ALLOW_PLATFORM_KEYS is set). Do NOT add a config.* fallback here — that
+    // would hand every user the platform keys and defeat per-user BYO.
+    const openAiKey = settings.openAiApiKey;
+    const anthropicKey = settings.anthropicApiKey;
     // Resolve the provider: explicit setting wins; "auto"/"gemini" falls back to
     // whichever provider has a key (preferring OpenAI, then Claude).
     const useClaude =
