@@ -57,6 +57,7 @@ const previewRunner = new PreviewRunner({
   basePort: config.previewBasePort,
   maxConcurrent: config.previewMaxConcurrent,
   idleTimeoutMs: config.previewIdleTimeoutMs,
+  buildMaxConcurrent: config.buildMaxConcurrent,
   viteBinPath: config.viteBinPath,
   chromeBinPath: config.chromeBinPath,
   projectRootFor: (projectId) => storage.getProjectRoot(projectId)

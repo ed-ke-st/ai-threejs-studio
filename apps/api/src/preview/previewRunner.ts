@@ -8,9 +8,29 @@ interface PreviewRunnerOptions {
   basePort: number;
   maxConcurrent: number;
   idleTimeoutMs: number;
+  buildMaxConcurrent: number;
   viteBinPath: string;
   chromeBinPath?: string;
   projectRootFor(projectId: string): string;
+}
+
+// Bounds concurrent heavy jobs; extra callers queue (FIFO) until a slot frees.
+class Semaphore {
+  private active = 0;
+  private readonly waiters: (() => void)[] = [];
+  constructor(private readonly max: number) {}
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.active >= this.max) {
+      await new Promise<void>((resolve) => this.waiters.push(resolve));
+    }
+    this.active += 1;
+    try {
+      return await fn();
+    } finally {
+      this.active -= 1;
+      this.waiters.shift()?.();
+    }
+  }
 }
 
 interface InternalPreviewSession extends PreviewSession {
@@ -36,12 +56,14 @@ class PortPool {
 export class PreviewRunner {
   private readonly sessions = new Map<string, InternalPreviewSession>();
   private readonly pool: PortPool;
+  private readonly heavyJobs: Semaphore;
   private reaper?: NodeJS.Timeout;
 
   constructor(private readonly options: PreviewRunnerOptions) {
     // Headroom (+4) lets transient visual-validation previews run alongside the
     // capped live previews without starving them.
     this.pool = new PortPool(options.basePort, options.maxConcurrent + 4);
+    this.heavyJobs = new Semaphore(options.buildMaxConcurrent);
   }
 
   async start(projectId: string): Promise<PreviewSession> {
@@ -198,6 +220,7 @@ export class PreviewRunner {
 
   async buildWorkspace(workspacePath: string, options?: { base?: string }): Promise<BuildResult> {
     const startedAt = new Date().toISOString();
+    return this.heavyJobs.run(async () => {
     const typecheck = await runCommand(workspacePath, "typecheck", process.execPath, [
       requireResolve("typescript/bin/tsc"),
       "-b",
@@ -225,9 +248,11 @@ export class PreviewRunner {
       startedAt,
       finishedAt: new Date().toISOString()
     };
+    });
   }
 
   async validateWorkspaceVisual(workspacePath: string): Promise<VisualValidationResult> {
+    return this.heavyJobs.run(async () => {
     let port = this.pool.acquire();
     if (port === undefined) {
       // Free a slot by evicting the least-recently-used live preview.
@@ -277,6 +302,7 @@ export class PreviewRunner {
       this.pool.release(port);
       await delay(200);
     }
+    });
   }
 
   stopAll(): void {

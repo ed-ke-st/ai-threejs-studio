@@ -31,6 +31,9 @@ export const config = {
   // (swap local disk for object storage + CDN at deploy time). "live" keeps the
   // local dev server for fast iteration. Default: static in production.
   previewMode: (process.env.PREVIEW_MODE as "live" | "static") ?? (process.env.NODE_ENV === "production" ? "static" : "live"),
+  // Cap concurrent heavy jobs (vite build + headless-Chrome visual validation) so
+  // bursts (many users / agent runs) can't thrash the host; the rest queue.
+  buildMaxConcurrent: Number(process.env.BUILD_MAX_CONCURRENT ?? 2),
   viteBinPath: path.resolve(repoRoot, "node_modules/vite/bin/vite.js"),
   chromeBinPath:
     process.env.CHROME_BIN_PATH ??
