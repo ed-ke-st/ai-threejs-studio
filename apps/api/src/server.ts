@@ -7,6 +7,7 @@ import { createProjectRepository } from "./projects.js";
 import { registerAuth } from "./auth/supabaseAuth.js";
 import { createSettingsRepository } from "./settings.js";
 import { createUsageService } from "./usage.js";
+import { getBlobStore } from "./storage/blobStore.js";
 import { closeSql } from "./db.js";
 import { PreviewRunner } from "./preview/previewRunner.js";
 import { LocalRagService } from "./rag/localRagService.js";
@@ -46,12 +47,13 @@ registerAuth(app);
 
 const settingsRepository = await createSettingsRepository();
 const usageService = createUsageService();
+await getBlobStore().init();
 
 const projectRepository = await createProjectRepository();
 const ragService = new LocalRagService(config.ragIndexPath, config.agentExampleBankPath, config.retrievalTuningPath);
 await ragService.load();
 const storage = new LocalWorkspaceStorage(config.workspaceRoot, config.snapshotRoot);
-const assetLibrary = new ProjectAssetLibrary(config.assetRoot, config.publicApiBaseUrl);
+const assetLibrary = new ProjectAssetLibrary(getBlobStore(), config.publicApiBaseUrl);
 const previewRunner = new PreviewRunner({
   host: config.previewHost,
   basePort: config.previewBasePort,

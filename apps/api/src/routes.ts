@@ -19,6 +19,7 @@ import type { QuotaStatus, UsageService } from "./usage.js";
 import type { PreviewRunner } from "./preview/previewRunner.js";
 import type { LocalRagService } from "./rag/localRagService.js";
 import type { ProjectStorage } from "./storage/localWorkspaceStorage.js";
+import { getBlobStore, putDir } from "./storage/blobStore.js";
 
 const createProjectSchema = z.object({
   name: z.string().min(1).default("Untitled Project"),
@@ -135,6 +136,7 @@ export function registerRoutes(
   usageService: UsageService
 ): void {
   const shares = new Map<string, ProjectShare>();
+  const blobStore = getBlobStore();
 
   // Loads a project and enforces ownership. On a missing OR not-owned project it
   // sends 404 (not 403, so project ids aren't probeable) and returns null — the
@@ -184,6 +186,7 @@ export function registerRoutes(
     if (!(await isPreviewFresh(storage.getProjectRoot(id)))) {
       const build = await previewRunner.build(id, { base: "./" });
       if (!build.ok) return { build };
+      await putDir(blobStore, `previews/${id}`, path.join(storage.getProjectRoot(id), "dist"));
     }
     return { session: staticPreviewSession(id) };
   }
@@ -301,6 +304,7 @@ export function registerRoutes(
     previewRunner.stop(id);
     await storage.deleteProject(id);
     await assetLibrary.deleteProjectAssets(id);
+    await blobStore.deletePrefix(`previews/${id}`);
     await projectRepository.deleteProject(id);
 
     return reply.code(204).send();
@@ -392,23 +396,22 @@ export function registerRoutes(
   app.get("/shares/:shareId/*", async (request, reply) => {
     const { shareId } = request.params as { shareId: string };
     const wildcard = (request.params as Record<string, string>)["*"] || "index.html";
-    const shareDir = path.join(config.shareRoot, shareId);
-    const target = path.resolve(shareDir, wildcard === "" ? "index.html" : wildcard);
-
-    if (target !== shareDir && !target.startsWith(`${shareDir}${path.sep}`)) {
-      return reply.code(403).send({ error: "Invalid path" });
-    }
+    const relative = wildcard === "" ? "index.html" : wildcard;
 
     try {
-      const content = await fs.readFile(target);
-      return reply.type(shareContentType(target)).send(content);
-    } catch {
-      try {
-        return reply.type("text/html; charset=utf-8").send(await fs.readFile(path.join(shareDir, "index.html")));
-      } catch {
-        return reply.code(404).send({ error: "Share not found" });
+      const content = await blobStore.get(`shares/${shareId}/${relative}`);
+      if (content) {
+        return reply.type(shareContentType(relative)).send(content);
       }
+      // SPA fallback to index.html.
+      const index = await blobStore.get(`shares/${shareId}/index.html`);
+      if (index) {
+        return reply.type("text/html; charset=utf-8").send(index);
+      }
+    } catch {
+      // invalid key (e.g. path traversal) falls through to 404
     }
+    return reply.code(404).send({ error: "Share not found" });
   });
 
   app.post("/projects", async (request, reply) => {
@@ -582,22 +585,21 @@ export function registerRoutes(
     if (!project) return;
 
     const wildcard = (request.params as Record<string, string>)["*"] || "index.html";
-    const distDir = path.join(storage.getProjectRoot(id), "dist");
-    const target = path.resolve(distDir, wildcard === "" ? "index.html" : wildcard);
-    if (target !== distDir && !target.startsWith(`${distDir}${path.sep}`)) {
-      return reply.code(403).send({ error: "Invalid path" });
-    }
+    const relative = wildcard === "" ? "index.html" : wildcard;
 
     try {
-      const content = await fs.readFile(target);
-      return reply.type(shareContentType(target)).send(content);
-    } catch {
-      try {
-        return reply.type("text/html; charset=utf-8").send(await fs.readFile(path.join(distDir, "index.html")));
-      } catch {
-        return reply.code(404).send({ error: "Preview not built yet." });
+      const content = await blobStore.get(`previews/${id}/${relative}`);
+      if (content) {
+        return reply.type(shareContentType(relative)).send(content);
       }
+      const index = await blobStore.get(`previews/${id}/index.html`);
+      if (index) {
+        return reply.type("text/html; charset=utf-8").send(index);
+      }
+    } catch {
+      // invalid key (e.g. path traversal) falls through to 404
     }
+    return reply.code(404).send({ error: "Preview not built yet." });
   });
 
   app.post("/projects/:id/build", async (request, reply) => {
@@ -652,8 +654,8 @@ export function registerRoutes(
 
     if (!project) return;
 
-    // Build a self-contained static bundle (relative asset paths) and copy it to
-    // the shares directory. The shared scene renders with no dev server.
+    // Build a self-contained static bundle (relative asset paths) and upload it to
+    // object storage. The shared scene renders with no dev server.
     const build = await previewRunner.build(id, { base: "./" });
     if (!build.ok) {
       return reply.code(422).send({ build });
@@ -661,10 +663,7 @@ export function registerRoutes(
 
     const shareId = nanoid(12);
     const distPath = path.join(storage.getProjectRoot(id), "dist");
-    const shareDir = path.join(config.shareRoot, shareId);
-    await fs.rm(shareDir, { recursive: true, force: true });
-    await fs.mkdir(path.dirname(shareDir), { recursive: true });
-    await fs.cp(distPath, shareDir, { recursive: true });
+    await putDir(blobStore, `shares/${shareId}`, distPath);
 
     const host = request.headers.host ?? "127.0.0.1";
     const origin = `${request.protocol}://${host}`;

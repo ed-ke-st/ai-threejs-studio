@@ -1,13 +1,12 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { nanoid } from "nanoid";
 import type { Asset } from "@ai-threejs-studio/shared";
+import type { BlobStore } from "../storage/blobStore.js";
 
 const SUPPORTED_ASSET_TYPES = new Set<Asset["type"]>(["model/glb", "model/gltf"]);
 
 export class ProjectAssetLibrary {
   constructor(
-    private readonly assetRoot: string,
+    private readonly blob: BlobStore,
     private readonly publicApiBaseUrl: string
   ) {}
 
@@ -29,11 +28,9 @@ export class ProjectAssetLibrary {
     const now = new Date().toISOString();
     const assetId = nanoid(12);
     const fileName = `${assetId}-${sanitizeFileName(input.name)}`;
-    const filePath = path.join(this.filesDir(input.projectId), fileName);
     const assets = await this.readIndex(input.projectId);
 
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, buffer);
+    await this.blob.put(this.fileKey(input.projectId, fileName), buffer);
 
     const asset: Asset = {
       id: assetId,
@@ -61,7 +58,7 @@ export class ProjectAssetLibrary {
   }
 
   async deleteProjectAssets(projectId: string): Promise<void> {
-    await fs.rm(this.projectDir(projectId), { force: true, recursive: true });
+    await this.blob.deletePrefix(this.projectPrefix(projectId));
   }
 
   async readProjectAssetContent(projectId: string, assetId: string): Promise<{ asset: Asset; content: Buffer; contentType: string }> {
@@ -71,8 +68,11 @@ export class ProjectAssetLibrary {
       throw new Error("Asset not found.");
     }
 
-    const filePath = path.join(this.filesDir(projectId), `${asset.id}-${sanitizeFileName(asset.name)}`);
-    const content = await fs.readFile(filePath);
+    const content = await this.blob.get(this.fileKey(projectId, `${asset.id}-${sanitizeFileName(asset.name)}`));
+    if (!content) {
+      throw new Error("Asset not found.");
+    }
+
     return {
       asset,
       content,
@@ -81,35 +81,26 @@ export class ProjectAssetLibrary {
   }
 
   private async readIndex(projectId: string): Promise<Asset[]> {
-    try {
-      const content = await fs.readFile(this.indexPath(projectId), "utf8");
-      const parsed = JSON.parse(content) as Asset[];
-      return parsed.filter((asset) => asset.projectId === projectId);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return [];
-      }
-
-      throw error;
-    }
+    const content = await this.blob.get(this.indexKey(projectId));
+    if (!content) return [];
+    const parsed = JSON.parse(content.toString("utf8")) as Asset[];
+    return parsed.filter((asset) => asset.projectId === projectId);
   }
 
   private async writeIndex(projectId: string, assets: Asset[]): Promise<void> {
-    const indexPath = this.indexPath(projectId);
-    await fs.mkdir(path.dirname(indexPath), { recursive: true });
-    await fs.writeFile(indexPath, `${JSON.stringify(assets, null, 2)}\n`, "utf8");
+    await this.blob.put(this.indexKey(projectId), `${JSON.stringify(assets, null, 2)}\n`);
   }
 
-  private indexPath(projectId: string): string {
-    return path.join(this.projectDir(projectId), "index.json");
+  private projectPrefix(projectId: string): string {
+    return `assets/${sanitizeSegment(projectId)}`;
   }
 
-  private filesDir(projectId: string): string {
-    return path.join(this.projectDir(projectId), "files");
+  private indexKey(projectId: string): string {
+    return `${this.projectPrefix(projectId)}/index.json`;
   }
 
-  private projectDir(projectId: string): string {
-    return path.join(this.assetRoot, sanitizeSegment(projectId));
+  private fileKey(projectId: string, fileName: string): string {
+    return `${this.projectPrefix(projectId)}/files/${fileName}`;
   }
 }
 
