@@ -21,6 +21,11 @@ export const config = {
   publicApiBaseUrl: process.env.PUBLIC_API_BASE_URL ?? `http://${process.env.API_HOST ?? "127.0.0.1"}:${Number(process.env.API_PORT ?? 4000)}`,
   previewHost: process.env.PREVIEW_HOST ?? "127.0.0.1",
   previewBasePort: Number(process.env.PREVIEW_BASE_PORT ?? 4300),
+  // Cap concurrent live preview dev servers; the least-recently-used one is
+  // evicted past this. Idle previews are reaped after the timeout. Ports are
+  // pooled/reclaimed (not leaked) within [basePort, basePort + maxConcurrent + 4).
+  previewMaxConcurrent: Number(process.env.PREVIEW_MAX_CONCURRENT ?? 4),
+  previewIdleTimeoutMs: Number(process.env.PREVIEW_IDLE_TIMEOUT_MS ?? 300_000),
   viteBinPath: path.resolve(repoRoot, "node_modules/vite/bin/vite.js"),
   chromeBinPath:
     process.env.CHROME_BIN_PATH ??

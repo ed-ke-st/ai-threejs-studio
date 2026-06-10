@@ -55,6 +55,8 @@ const assetLibrary = new ProjectAssetLibrary(config.assetRoot, config.publicApiB
 const previewRunner = new PreviewRunner({
   host: config.previewHost,
   basePort: config.previewBasePort,
+  maxConcurrent: config.previewMaxConcurrent,
+  idleTimeoutMs: config.previewIdleTimeoutMs,
   viteBinPath: config.viteBinPath,
   chromeBinPath: config.chromeBinPath,
   projectRootFor: (projectId) => storage.getProjectRoot(projectId)

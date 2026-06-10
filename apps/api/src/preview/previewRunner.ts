@@ -6,6 +6,8 @@ import { runVisualValidation } from "./visualValidation.js";
 interface PreviewRunnerOptions {
   host: string;
   basePort: number;
+  maxConcurrent: number;
+  idleTimeoutMs: number;
   viteBinPath: string;
   chromeBinPath?: string;
   projectRootFor(projectId: string): string;
@@ -13,14 +15,33 @@ interface PreviewRunnerOptions {
 
 interface InternalPreviewSession extends PreviewSession {
   process?: ChildProcessWithoutNullStreams;
+  lastAccessedAt: number;
+}
+
+// Bounded pool of localhost ports, reclaimed on release. Replaces the old
+// ever-incrementing counter so ports can't leak under multi-user load.
+class PortPool {
+  private readonly free: number[] = [];
+  constructor(base: number, size: number) {
+    for (let i = 0; i < size; i += 1) this.free.push(base + i);
+  }
+  acquire(): number | undefined {
+    return this.free.shift();
+  }
+  release(port: number): void {
+    if (!this.free.includes(port)) this.free.push(port);
+  }
 }
 
 export class PreviewRunner {
   private readonly sessions = new Map<string, InternalPreviewSession>();
-  private nextPort: number;
+  private readonly pool: PortPool;
+  private reaper?: NodeJS.Timeout;
 
   constructor(private readonly options: PreviewRunnerOptions) {
-    this.nextPort = options.basePort;
+    // Headroom (+4) lets transient visual-validation previews run alongside the
+    // capped live previews without starving them.
+    this.pool = new PortPool(options.basePort, options.maxConcurrent + 4);
   }
 
   async start(projectId: string): Promise<PreviewSession> {
@@ -40,21 +61,33 @@ export class PreviewRunner {
   }
 
   stop(projectId: string): void {
-    this.stopSession(`project:${projectId}`);
+    this.releaseSession(`project:${projectId}`);
   }
 
   stopWorkspaceSession(sessionKey: string): void {
-    this.stopSession(sessionKey);
+    this.releaseSession(sessionKey);
   }
 
   private async startSession(sessionKey: string, workspacePath: string, projectId: string): Promise<PreviewSession> {
     const existing = this.sessions.get(sessionKey);
 
     if (existing && existing.status !== "stopped" && existing.status !== "failed") {
+      existing.lastAccessedAt = Date.now();
       return this.publicSession(existing);
     }
 
-    const port = this.nextPort++;
+    if (existing) {
+      this.releaseSession(sessionKey); // reclaim a dead session's port before reusing the key
+    }
+
+    // Keep live previews under the concurrency cap by evicting the LRU one(s).
+    this.evictActiveToCap(this.options.maxConcurrent - 1);
+
+    const port = this.pool.acquire();
+    if (port === undefined) {
+      throw new Error("No preview slot is available right now. Please try again shortly.");
+    }
+
     const url = `http://${this.options.host}:${port}/`;
     const session: InternalPreviewSession = {
       projectId,
@@ -62,7 +95,8 @@ export class PreviewRunner {
       url,
       port,
       logs: "",
-      startedAt: new Date().toISOString()
+      startedAt: new Date().toISOString(),
+      lastAccessedAt: Date.now()
     };
 
     const child = spawn(process.execPath, [this.options.viteBinPath, "--host", this.options.host, "--port", String(port), "--strictPort"], {
@@ -95,18 +129,24 @@ export class PreviewRunner {
       session.status = code === 0 ? "stopped" : "failed";
       session.logs = trimLogs(`${session.logs}\nPreview process exited with code ${code ?? "unknown"}.\n`);
       session.process = undefined;
+      this.pool.release(session.port); // reclaim the port when the process dies on its own
     });
 
+    this.ensureReaper();
     await this.waitForStart(session);
     return this.publicSession(session);
   }
 
   private getSession(sessionKey: string): PreviewSession | null {
     const session = this.sessions.get(sessionKey);
-    return session ? this.publicSession(session) : null;
+    if (!session) {
+      return null;
+    }
+    session.lastAccessedAt = Date.now();
+    return this.publicSession(session);
   }
 
-  private stopSession(sessionKey: string): void {
+  private releaseSession(sessionKey: string): void {
     const session = this.sessions.get(sessionKey);
 
     if (!session) {
@@ -116,7 +156,40 @@ export class PreviewRunner {
     session.process?.kill("SIGTERM");
     session.process = undefined;
     session.status = "stopped";
+    this.pool.release(session.port);
     this.sessions.delete(sessionKey);
+  }
+
+  /** Evict least-recently-used active previews until at most `targetMax` remain. */
+  private evictActiveToCap(targetMax: number): void {
+    const active = () =>
+      [...this.sessions.entries()].filter(([, s]) => s.status === "starting" || s.status === "running");
+    let actives = active();
+    while (actives.length > targetMax) {
+      actives.sort((a, b) => a[1].lastAccessedAt - b[1].lastAccessedAt);
+      this.releaseSession(actives[0][0]);
+      actives = active();
+    }
+  }
+
+  private ensureReaper(): void {
+    if (this.reaper) return;
+    this.reaper = setInterval(() => this.reapIdle(), 60_000);
+    this.reaper.unref?.();
+  }
+
+  private reapIdle(): void {
+    const now = Date.now();
+    for (const [key, session] of this.sessions) {
+      const active = session.status === "starting" || session.status === "running";
+      if (!active || now - session.lastAccessedAt > this.options.idleTimeoutMs) {
+        this.releaseSession(key);
+      }
+    }
+    if (this.sessions.size === 0 && this.reaper) {
+      clearInterval(this.reaper);
+      this.reaper = undefined;
+    }
   }
 
   async build(projectId: string, options?: { base?: string }): Promise<BuildResult> {
@@ -155,7 +228,29 @@ export class PreviewRunner {
   }
 
   async validateWorkspaceVisual(workspacePath: string): Promise<VisualValidationResult> {
-    const session = await startWorkspacePreview(workspacePath, this.options.host, this.nextPort++, this.options.viteBinPath);
+    let port = this.pool.acquire();
+    if (port === undefined) {
+      // Free a slot by evicting the least-recently-used live preview.
+      this.evictActiveToCap(Math.max(0, this.options.maxConcurrent - 1));
+      port = this.pool.acquire();
+    }
+    if (port === undefined) {
+      return {
+        status: "warning",
+        ok: true,
+        screenshotCaptured: false,
+        findings: [
+          {
+            code: "preview-slot-unavailable",
+            message: "Visual validation skipped: no preview slot was available.",
+            severity: "warning"
+          }
+        ],
+        logs: "Visual validation skipped: preview port pool exhausted."
+      };
+    }
+
+    const session = await startWorkspacePreview(workspacePath, this.options.host, port, this.options.viteBinPath);
 
     try {
       if (session.status !== "running") {
@@ -179,14 +274,20 @@ export class PreviewRunner {
       });
     } finally {
       session.process?.kill("SIGTERM");
+      this.pool.release(port);
       await delay(200);
     }
   }
 
   stopAll(): void {
+    if (this.reaper) {
+      clearInterval(this.reaper);
+      this.reaper = undefined;
+    }
     for (const session of this.sessions.values()) {
       session.process?.kill("SIGTERM");
     }
+    this.sessions.clear();
   }
 
   private async waitForStart(session: InternalPreviewSession): Promise<void> {
@@ -210,7 +311,7 @@ export class PreviewRunner {
   }
 
   private publicSession(session: InternalPreviewSession): PreviewSession {
-    const { process: _process, ...previewSession } = session;
+    const { process: _process, lastAccessedAt: _lastAccessedAt, ...previewSession } = session;
     return previewSession;
   }
 }
@@ -266,7 +367,8 @@ async function startWorkspacePreview(
     url,
     port,
     logs: "",
-    startedAt: new Date().toISOString()
+    startedAt: new Date().toISOString(),
+    lastAccessedAt: Date.now()
   };
 
   const child = spawn(process.execPath, [viteBinPath, "--host", host, "--port", String(port), "--strictPort"], {
