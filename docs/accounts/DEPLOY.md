@@ -36,9 +36,15 @@ docker run -p 4000:4000 \
   ats-api
 ```
 
-- `NODE_ENV=production` is set in the image, so `PREVIEW_MODE` defaults to **static**
-  (previews served through the authed API — no raw ports).
+- `NODE_ENV=production` is set in the image, so `PREVIEW_MODE`/`BLOB_BACKEND`/
+  `WORKSPACE_BACKEND` default to **static / supabase / blob** (previews served through
+  the authed API; projects + bundles in object storage). ⚠️ If you pass the repo `.env`
+  via `--env-file`, it will override these back to dev/localhost — also set
+  `-e NODE_ENV=production -e API_HOST=0.0.0.0` (otherwise the app binds localhost inside
+  the container and the port mapping can't reach it). Prefer explicit `-e` vars in prod.
 - The image installs **Chromium** and sets `CHROME_BIN_PATH` for visual validation.
+- Validated: `docker build .` is clean and the container boots in prod mode + builds
+  and serves a project from Supabase Storage end-to-end.
 - It is **not** a slim image on purpose: the API runs `vite`/`tsc` at runtime to
   build user projects, so the toolchain + dev deps stay in the image.
 - Apply the migrations once against `SUPABASE_DB_URL` (see RUNBOOK.md).
