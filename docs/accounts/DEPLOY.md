@@ -55,23 +55,31 @@ docker run -p 4000:4000 \
 
 ## Object storage
 
-Served/durable bundles — **shares, uploaded assets, and the static preview dist** —
-go through a `BlobStore`: `BLOB_BACKEND=supabase` uses Supabase Storage (bucket
-`SUPABASE_STORAGE_BUCKET`, default `studio`, via `SUPABASE_SERVICE_ROLE_KEY`),
-`local` uses disk. Defaults to `supabase` in production. The bucket is created at
-startup. So those artifacts survive restarts and are instance-independent.
+Both the **served bundles** (shares, assets, static preview dist) AND the **project
+workspace source** go through a `BlobStore`: `BLOB_BACKEND=supabase` uses Supabase
+Storage (bucket `SUPABASE_STORAGE_BUCKET`, default `studio`, via
+`SUPABASE_SERVICE_ROLE_KEY`), `local` uses disk. `WORKSPACE_BACKEND=blob` makes the
+workspace source canonical in object storage; builds hydrate a temp dir under
+`/app/.studio/tmp` (must be inside the app so the project's `node_modules` resolves).
+Both default to the object-storage path in production. So **any instance can serve or
+build any project** — no per-instance disk state for projects.
 
 | Env | Default | Purpose |
 |---|---|---|
 | `BLOB_BACKEND` | supabase (prod) / local | object-storage backend |
+| `WORKSPACE_BACKEND` | blob (prod) / local | workspace source backend |
 | `SUPABASE_STORAGE_BUCKET` | studio | bucket name |
 
-## Known limits (single-instance, for now)
+## Known limits
 
-- **The project *working* files still live on the `/app/.studio` volume** (the build
-  runs on local disk), so editing/building is single-instance. True multi-instance
-  needs the workspace source in object storage with hydrate-before-build (increment B).
 - Bundles are currently **served through the API** from object storage. Offloading to
   signed CDN URLs (so bytes don't transit the API) is a follow-up optimization.
-- Preview/quota in-flight state is in-process; multi-instance also needs that externalized.
+- **Preview/quota in-flight state is in-process** (the live-preview session map; the
+  quota counters are in Postgres and fine). For >1 instance, live preview is off
+  anyway (static mode), so this mainly means a build runs per instance until a CDN/
+  shared cache fronts the bundles. Externalizing remaining in-memory state is the
+  last item before comfortable multi-instance.
+- `/app/.studio/tmp` is scratch (hydrated build dirs, auto-cleaned); a volume is
+  optional now that projects live in object storage, but still useful for the RAG
+  index and any `local`-backend data.
 - The live preview runner (`PREVIEW_MODE=live`) is for local/single-tenant dev only.
