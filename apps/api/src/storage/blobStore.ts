@@ -16,6 +16,12 @@ export interface BlobStore {
   delete(key: string): Promise<void>;
   list(prefix: string): Promise<string[]>;
   deletePrefix(prefix: string): Promise<void>;
+  /**
+   * A short-lived URL to fetch the object directly from storage (offloading bytes
+   * from the API). Returns null when unsupported (local disk) or the object is
+   * missing — callers fall back to streaming through the API.
+   */
+  signedUrl(key: string, expiresInSeconds: number): Promise<string | null>;
 }
 
 /** Uploads every file under `localDir` to `keyPrefix`, preserving relative paths. */
@@ -85,6 +91,10 @@ class LocalBlobStore implements BlobStore {
     await fs.rm(this.toPath(key), { force: true });
   }
 
+  async signedUrl(): Promise<string | null> {
+    return null; // local disk has no external URL; callers stream through the API
+  }
+
   async list(prefix: string): Promise<string[]> {
     const base = this.toPath(prefix);
     const files = await walkFiles(base);
@@ -133,6 +143,11 @@ class SupabaseBlobStore implements BlobStore {
   async delete(key: string): Promise<void> {
     const { error } = await this.client.storage.from(this.bucket).remove([key]);
     if (error) throw error;
+  }
+
+  async signedUrl(key: string, expiresInSeconds: number): Promise<string | null> {
+    const { data, error } = await this.client.storage.from(this.bucket).createSignedUrl(key, expiresInSeconds);
+    return error || !data ? null : data.signedUrl;
   }
 
   async list(prefix: string): Promise<string[]> {

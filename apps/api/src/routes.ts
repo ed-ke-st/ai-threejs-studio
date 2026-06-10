@@ -157,6 +157,29 @@ export function registerRoutes(
   // --- Static (hosted) preview: serve the project's built dist through the authed
   // API. The production architecture — at deploy time the dist read/write moves to
   // object storage + a signed CDN URL; the flow here is otherwise unchanged.
+  // Serves a built-bundle file. The entry (index.html) streams through the API so
+  // relative asset paths resolve back here; sub-files redirect to a short-lived
+  // signed storage URL so the heavy bytes skip the API (streams for local storage).
+  async function serveBundleFile(reply: import("fastify").FastifyReply, prefix: string, relative: string) {
+    if (relative.includes("..")) {
+      return reply.code(404).send({ error: "Not found" });
+    }
+    const key = `${prefix}/${relative}`;
+    if (relative !== "index.html") {
+      const url = await blobStore.signedUrl(key, 3600).catch(() => null);
+      if (url) return reply.redirect(url);
+    }
+    try {
+      const content = await blobStore.get(key);
+      if (content) return reply.type(shareContentType(relative)).send(content);
+      const index = await blobStore.get(`${prefix}/index.html`);
+      if (index) return reply.type("text/html; charset=utf-8").send(index);
+    } catch {
+      // fall through to 404
+    }
+    return reply.code(404).send({ error: "Not found" });
+  }
+
   function staticPreviewSession(id: string): PreviewSession {
     return {
       projectId: id,
@@ -374,6 +397,10 @@ export function registerRoutes(
     const project = await requireOwnedProject(request, reply, id);
     if (!project) return;
 
+    // Offload the (potentially large) binary to storage via a signed URL.
+    const signed = await assetLibrary.signedAssetUrl(id, assetId, 3600).catch(() => null);
+    if (signed) return reply.redirect(signed);
+
     try {
       const file = await assetLibrary.readProjectAssetContent(id, assetId);
       reply.header("cache-control", "public, max-age=3600");
@@ -392,22 +419,7 @@ export function registerRoutes(
   app.get("/shares/:shareId/*", async (request, reply) => {
     const { shareId } = request.params as { shareId: string };
     const wildcard = (request.params as Record<string, string>)["*"] || "index.html";
-    const relative = wildcard === "" ? "index.html" : wildcard;
-
-    try {
-      const content = await blobStore.get(`shares/${shareId}/${relative}`);
-      if (content) {
-        return reply.type(shareContentType(relative)).send(content);
-      }
-      // SPA fallback to index.html.
-      const index = await blobStore.get(`shares/${shareId}/index.html`);
-      if (index) {
-        return reply.type("text/html; charset=utf-8").send(index);
-      }
-    } catch {
-      // invalid key (e.g. path traversal) falls through to 404
-    }
-    return reply.code(404).send({ error: "Share not found" });
+    return serveBundleFile(reply, `shares/${shareId}`, wildcard === "" ? "index.html" : wildcard);
   });
 
   app.post("/projects", async (request, reply) => {
@@ -581,21 +593,7 @@ export function registerRoutes(
     if (!project) return;
 
     const wildcard = (request.params as Record<string, string>)["*"] || "index.html";
-    const relative = wildcard === "" ? "index.html" : wildcard;
-
-    try {
-      const content = await blobStore.get(`previews/${id}/${relative}`);
-      if (content) {
-        return reply.type(shareContentType(relative)).send(content);
-      }
-      const index = await blobStore.get(`previews/${id}/index.html`);
-      if (index) {
-        return reply.type("text/html; charset=utf-8").send(index);
-      }
-    } catch {
-      // invalid key (e.g. path traversal) falls through to 404
-    }
-    return reply.code(404).send({ error: "Preview not built yet." });
+    return serveBundleFile(reply, `previews/${id}`, wildcard === "" ? "index.html" : wildcard);
   });
 
   app.post("/projects/:id/build", async (request, reply) => {

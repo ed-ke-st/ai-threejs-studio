@@ -61,6 +61,13 @@ export class ProjectAssetLibrary {
     await this.blob.deletePrefix(this.projectPrefix(projectId));
   }
 
+  /** A short-lived direct-download URL for the asset, or null (local / missing). */
+  async signedAssetUrl(projectId: string, assetId: string, expiresInSeconds: number): Promise<string | null> {
+    const asset = await this.getProjectAsset(projectId, assetId);
+    if (!asset) return null;
+    return this.blob.signedUrl(this.fileKey(projectId, `${asset.id}-${sanitizeFileName(asset.name)}`), expiresInSeconds);
+  }
+
   async readProjectAssetContent(projectId: string, assetId: string): Promise<{ asset: Asset; content: Buffer; contentType: string }> {
     const asset = await this.getProjectAsset(projectId, assetId);
 
