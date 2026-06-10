@@ -7,6 +7,8 @@ export type ProjectTemplateId =
 
 export interface Project {
   id: string;
+  /** Owning user (auth.users.id in Supabase mode; a constant local owner in single-tenant mode). */
+  ownerId: string;
   name: string;
   templateId: ProjectTemplateId;
   createdAt: string;

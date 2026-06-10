@@ -1,10 +1,13 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
-import { config } from "./config.js";
+import { config, validateConfig } from "./config.js";
 import { ProjectAssetLibrary } from "./assets/projectAssetLibrary.js";
 import { ProjectExportService } from "./export/projectExport.js";
-import { LocalProjectRepository } from "./projects.js";
-import { LocalSettingsRepository } from "./settings.js";
+import { createProjectRepository } from "./projects.js";
+import { registerAuth } from "./auth/supabaseAuth.js";
+import { createSettingsRepository } from "./settings.js";
+import { createUsageService } from "./usage.js";
+import { closeSql } from "./db.js";
 import { PreviewRunner } from "./preview/previewRunner.js";
 import { LocalRagService } from "./rag/localRagService.js";
 import { registerRoutes } from "./routes.js";
@@ -28,15 +31,23 @@ const app = Fastify({
   }
 });
 
+// Fail fast on a half-configured accounts setup; log soft misconfigurations.
+for (const warning of validateConfig()) {
+  app.log.warn(warning);
+}
+
 await app.register(cors, {
   origin: true
 });
 
-const settingsRepository = new LocalSettingsRepository(config.settingsPath);
-await settingsRepository.load();
+// Resolves request.userId (Supabase JWT in multi-tenant mode; constant local owner
+// otherwise). Must run before the routes so ownership checks have a user.
+registerAuth(app);
 
-const projectRepository = new LocalProjectRepository(config.projectIndexPath);
-await projectRepository.load();
+const settingsRepository = await createSettingsRepository();
+const usageService = createUsageService();
+
+const projectRepository = await createProjectRepository();
 const ragService = new LocalRagService(config.ragIndexPath, config.agentExampleBankPath, config.retrievalTuningPath);
 await ragService.load();
 const storage = new LocalWorkspaceStorage(config.workspaceRoot, config.snapshotRoot);
@@ -58,16 +69,21 @@ registerRoutes(
   ragService,
   projectExportService,
   assetLibrary,
-  settingsRepository
+  settingsRepository,
+  usageService
 );
 
 process.once("SIGINT", () => {
   previewRunner.stopAll();
+  void projectRepository.close();
+  void closeSql();
   process.exit(0);
 });
 
 process.once("SIGTERM", () => {
   previewRunner.stopAll();
+  void projectRepository.close();
+  void closeSql();
   process.exit(0);
 });
 

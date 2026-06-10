@@ -7,12 +7,24 @@ import type {
   ProjectShare
 } from "@ai-threejs-studio/shared";
 import { create } from "zustand";
+import { authHeaders, supabase } from "../auth/supabaseClient";
 
 // Lean, Scene3D-centric store. The scene document itself (load/edit/generate) is
 // owned by the Scene3DEditor component talking to /scene3d; this store handles
 // project lifecycle, build, preview, share, export, and settings.
 
 export type PreviewSurface = "editor" | "runtime";
+
+/** Per-kind daily usage. `limit: null` means unlimited (single-tenant). */
+export interface QuotaSnapshot {
+  used: number;
+  limit: number | null;
+  allowed: boolean;
+}
+export interface UsageSnapshot {
+  agentRun: QuotaSnapshot;
+  build: QuotaSnapshot;
+}
 
 interface ProjectState {
   health: "checking" | "connected" | "offline";
@@ -46,6 +58,8 @@ interface ProjectState {
   exportBuildArchive: () => Promise<void>;
   loadSettings: () => Promise<void>;
   updateSettings: (patch: AppSettingsUpdate) => Promise<void>;
+  usage: UsageSnapshot | null;
+  loadUsage: () => Promise<void>;
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -61,6 +75,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isBuilding: false,
   share: null,
   settings: null,
+  usage: null,
   busy: false,
   toast: null,
 
@@ -141,8 +156,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const data = await api<{ build: BuildResult }>(`/projects/${projectId}/build`, { method: "POST" });
       set({ buildResult: data.build, statusMessage: data.build.ok ? "Build passed" : "Build failed" });
+    } catch (error) {
+      set({ statusMessage: error instanceof Error ? error.message : "Build failed" });
     } finally {
       set({ isBuilding: false });
+      void get().loadUsage();
     }
   },
 
@@ -191,19 +209,40 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       body: JSON.stringify(patch)
     });
     set({ settings: data.settings, statusMessage: "Settings saved" });
+  },
+
+  async loadUsage() {
+    try {
+      const data = await api<{ usage: UsageSnapshot }>("/usage");
+      set({ usage: data.usage });
+    } catch {
+      // non-critical — leave prior usage in place
+    }
   }
 }));
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api${path}`, init);
+async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(`/api${path}`, {
+    ...init,
+    headers: { ...(await authHeaders()), ...init.headers }
+  });
+  if (response.status === 401) {
+    await supabase?.auth.signOut();
+    throw new Error("Session expired");
+  }
   if (!response.ok) {
-    throw new Error(`API request failed: ${response.status}`);
+    // Surface the server's message (e.g. quota 429 text) when present.
+    const message = await response
+      .json()
+      .then((body: { error?: string }) => body?.error)
+      .catch(() => null);
+    throw new Error(message || `API request failed: ${response.status}`);
   }
   return response.json() as Promise<T>;
 }
 
 async function downloadProjectArchive(url: string, fallbackFileName: string): Promise<{ build?: BuildResult }> {
-  const response = await fetch(url, { method: "POST" });
+  const response = await fetch(url, { method: "POST", headers: await authHeaders() });
   if (!response.ok) {
     const data = (await response.json().catch(() => ({}))) as { build?: BuildResult };
     if (data.build) {

@@ -4,6 +4,7 @@ import { Scene3DEditor } from "./scene3d/Scene3DEditor";
 import { ProjectMenu } from "./ProjectMenu";
 import { ProjectToolbar } from "./ProjectToolbar";
 import { CloseIcon, SettingsIcon } from "./ui/icons";
+import { authEnabled, supabase } from "./auth/supabaseClient";
 import styles from "./App.module.css";
 
 export function App() {
@@ -20,6 +21,7 @@ export function App() {
   const checkHealth = useProjectStore((s) => s.checkHealth);
   const loadProjects = useProjectStore((s) => s.loadProjects);
   const loadSettings = useProjectStore((s) => s.loadSettings);
+  const loadUsage = useProjectStore((s) => s.loadUsage);
   const createProject = useProjectStore((s) => s.createProject);
   const startPreview = useProjectStore((s) => s.startPreview);
 
@@ -29,7 +31,8 @@ export function App() {
     void checkHealth();
     void loadProjects();
     void loadSettings();
-  }, [checkHealth, loadProjects, loadSettings]);
+    void loadUsage();
+  }, [checkHealth, loadProjects, loadSettings, loadUsage]);
 
   // Auto-start the preview when the Runtime surface is opened with no running
   // preview. The ref guards against retry storms if a start fails (it resets when
@@ -65,6 +68,11 @@ export function App() {
           <button className={styles.ghost} onClick={() => setShowSettings((v) => !v)}>
             {showSettings ? <CloseIcon /> : <SettingsIcon />}
           </button>
+          {authEnabled ? (
+            <button className={styles.ghost} onClick={() => void supabase?.auth.signOut()}>
+              Sign out
+            </button>
+          ) : null}
         </div>
       </header>
 

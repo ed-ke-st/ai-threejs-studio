@@ -15,6 +15,7 @@
     "@ai-threejs-studio/shared": "workspace:*",
     "@react-three/drei": "^10.1.2",
     "@react-three/fiber": "^9.1.2",
+    "@supabase/supabase-js": "^2.107.0",
     "@vitejs/plugin-react": "^4.5.0",
     "monaco-editor": "^0.52.2",
     "react": "^19.1.0",
