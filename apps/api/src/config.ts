@@ -87,6 +87,13 @@ export const config = {
     bucket: process.env.SUPABASE_STORAGE_BUCKET ?? "studio",
     localRoot: path.resolve(repoRoot, process.env.STUDIO_BLOB_ROOT ?? ".studio/blobs")
   },
+  // Project workspace source: "local" disk (stable dir, fast iteration) or "blob"
+  // (object storage canonical; builds hydrate a temp dir). "blob" enables any
+  // instance to build any project. Defaults to blob in production.
+  workspaceBackend: (process.env.WORKSPACE_BACKEND as "local" | "blob") ?? (process.env.NODE_ENV === "production" ? "blob" : "local"),
+  // Hydrated build dirs (blob mode) live here — MUST be inside the monorepo so the
+  // project's deps (vite/react/three) resolve via the hoisted node_modules.
+  materializeRoot: path.resolve(repoRoot, process.env.STUDIO_MATERIALIZE_ROOT ?? ".studio/tmp"),
   // Per-user daily quotas (multi-tenant only). Protect server resources now, and
   // become the cost cap if platform/test tokens are ever enabled. <= 0 = unlimited.
   quota: {

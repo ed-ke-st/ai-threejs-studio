@@ -180,8 +180,7 @@ export class Scene3DAgent {
   }
 
   private async visualValidate(projectId: string): Promise<VisualValidationResult> {
-    const root = this.options.storage.getProjectRoot(projectId);
-    return this.options.previewRunner.validateWorkspaceVisual(root);
+    return this.options.previewRunner.validateProject(projectId);
   }
 }
 

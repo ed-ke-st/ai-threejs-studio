@@ -13,8 +13,21 @@ export interface ProjectSnapshot {
   files: ProjectFileRecord[];
 }
 
+/** A local working directory for a project, ready for `vite build`/`tsc`. */
+export interface MaterializedWorkspace {
+  dir: string;
+  dispose(): Promise<void>;
+}
+
 export interface ProjectStorage {
+  /** Stable on-disk root (local storage only; used by the live preview server). */
   getProjectRoot(projectId: string): string;
+  /**
+   * Produces a local working directory containing the project's files, ready to
+   * build. Local storage returns its stable root (no-op dispose); object-storage
+   * hydrates a temp dir that `dispose()` cleans up.
+   */
+  materializeWorkspace(projectId: string): Promise<MaterializedWorkspace>;
   listProjectFiles(projectId: string): Promise<ProjectFileRecord[]>;
   getProjectFile(projectId: string, filePath: string): Promise<ProjectFileRecord | null>;
   writeProjectFile(projectId: string, filePath: string, content: string): Promise<ProjectFileRecord>;
@@ -33,6 +46,12 @@ export class LocalWorkspaceStorage implements ProjectStorage {
 
   getProjectRoot(projectId: string): string {
     return this.projectRoot(projectId);
+  }
+
+  async materializeWorkspace(projectId: string): Promise<MaterializedWorkspace> {
+    const dir = this.projectRoot(projectId);
+    await fs.mkdir(dir, { recursive: true });
+    return { dir, dispose: async () => {} };
   }
 
   async listProjectFiles(projectId: string): Promise<ProjectFileRecord[]> {

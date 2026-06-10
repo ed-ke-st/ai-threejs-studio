@@ -19,40 +19,45 @@ export class ProjectExportService {
   ) {}
 
   async exportSource(project: Project): Promise<ZipExportResult> {
-    const root = this.storage.getProjectRoot(project.id);
-    const archive = await zipDirectory(root, {
-      rootFolder: safeArchiveName(project.name),
-      exclude: ["dist/**", "node_modules/**", ".vite/**"]
-    });
-
-    return {
-      fileName: `${safeArchiveName(project.name)}-source.zip`,
-      archive
-    };
+    const ws = await this.storage.materializeWorkspace(project.id);
+    try {
+      const archive = await zipDirectory(ws.dir, {
+        rootFolder: safeArchiveName(project.name),
+        exclude: ["dist/**", "node_modules/**", ".vite/**"]
+      });
+      return {
+        fileName: `${safeArchiveName(project.name)}-source.zip`,
+        archive
+      };
+    } finally {
+      await ws.dispose();
+    }
   }
 
   async exportBuild(project: Project): Promise<ZipExportResult> {
-    const build = await this.previewRunner.build(project.id);
+    const { build, distDir, dispose } = await this.previewRunner.buildAndKeep(project.id);
+    try {
+      if (!build.ok) {
+        return {
+          fileName: `${safeArchiveName(project.name)}-dist.zip`,
+          archive: Buffer.alloc(0),
+          build
+        };
+      }
 
-    if (!build.ok) {
+      await fs.access(distDir);
+      const archive = await zipDirectory(distDir, {
+        rootFolder: `${safeArchiveName(project.name)}-dist`
+      });
+
       return {
         fileName: `${safeArchiveName(project.name)}-dist.zip`,
-        archive: Buffer.alloc(0),
+        archive,
         build
       };
+    } finally {
+      await dispose();
     }
-
-    const distPath = path.join(this.storage.getProjectRoot(project.id), "dist");
-    await fs.access(distPath);
-    const archive = await zipDirectory(distPath, {
-      rootFolder: `${safeArchiveName(project.name)}-dist`
-    });
-
-    return {
-      fileName: `${safeArchiveName(project.name)}-dist.zip`,
-      archive,
-      build
-    };
   }
 }
 

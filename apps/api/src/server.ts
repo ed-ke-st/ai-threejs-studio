@@ -12,7 +12,7 @@ import { closeSql } from "./db.js";
 import { PreviewRunner } from "./preview/previewRunner.js";
 import { LocalRagService } from "./rag/localRagService.js";
 import { registerRoutes } from "./routes.js";
-import { LocalWorkspaceStorage } from "./storage/localWorkspaceStorage.js";
+import { createWorkspaceStorage } from "./storage/blobWorkspaceStorage.js";
 
 const app = Fastify({
   // Scenes embed uploaded image textures inline as data URIs, so a scene save can
@@ -52,7 +52,7 @@ await getBlobStore().init();
 const projectRepository = await createProjectRepository();
 const ragService = new LocalRagService(config.ragIndexPath, config.agentExampleBankPath, config.retrievalTuningPath);
 await ragService.load();
-const storage = new LocalWorkspaceStorage(config.workspaceRoot, config.snapshotRoot);
+const storage = await createWorkspaceStorage();
 const assetLibrary = new ProjectAssetLibrary(getBlobStore(), config.publicApiBaseUrl);
 const previewRunner = new PreviewRunner({
   host: config.previewHost,
@@ -62,7 +62,7 @@ const previewRunner = new PreviewRunner({
   buildMaxConcurrent: config.buildMaxConcurrent,
   viteBinPath: config.viteBinPath,
   chromeBinPath: config.chromeBinPath,
-  projectRootFor: (projectId) => storage.getProjectRoot(projectId)
+  materialize: (projectId) => storage.materializeWorkspace(projectId)
 });
 const projectExportService = new ProjectExportService(storage, previewRunner);
 

@@ -1,6 +1,8 @@
+import path from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import type { BuildResult, PreviewSession, VisualValidationResult } from "@ai-threejs-studio/shared";
+import type { MaterializedWorkspace } from "../storage/localWorkspaceStorage.js";
 import { runVisualValidation } from "./visualValidation.js";
 
 interface PreviewRunnerOptions {
@@ -11,7 +13,9 @@ interface PreviewRunnerOptions {
   buildMaxConcurrent: number;
   viteBinPath: string;
   chromeBinPath?: string;
-  projectRootFor(projectId: string): string;
+  // Produces a local working dir for a project (a stable dir for local storage, a
+  // hydrated temp dir for object storage). Callers that keep the dir dispose it.
+  materialize(projectId: string): Promise<MaterializedWorkspace>;
 }
 
 // Bounds concurrent heavy jobs; extra callers queue (FIFO) until a slot frees.
@@ -36,6 +40,7 @@ class Semaphore {
 interface InternalPreviewSession extends PreviewSession {
   process?: ChildProcessWithoutNullStreams;
   lastAccessedAt: number;
+  dispose?: () => Promise<void>;
 }
 
 // Bounded pool of localhost ports, reclaimed on release. Replaces the old
@@ -67,7 +72,8 @@ export class PreviewRunner {
   }
 
   async start(projectId: string): Promise<PreviewSession> {
-    return this.startSession(`project:${projectId}`, this.options.projectRootFor(projectId), projectId);
+    const ws = await this.options.materialize(projectId);
+    return this.startSession(`project:${projectId}`, ws.dir, projectId, ws.dispose);
   }
 
   async startWorkspaceSession(sessionKey: string, workspacePath: string, projectId: string): Promise<PreviewSession> {
@@ -90,11 +96,17 @@ export class PreviewRunner {
     this.releaseSession(sessionKey);
   }
 
-  private async startSession(sessionKey: string, workspacePath: string, projectId: string): Promise<PreviewSession> {
+  private async startSession(
+    sessionKey: string,
+    workspacePath: string,
+    projectId: string,
+    dispose?: () => Promise<void>
+  ): Promise<PreviewSession> {
     const existing = this.sessions.get(sessionKey);
 
     if (existing && existing.status !== "stopped" && existing.status !== "failed") {
       existing.lastAccessedAt = Date.now();
+      void dispose?.(); // a hydrated dir we won't use (existing session already running)
       return this.publicSession(existing);
     }
 
@@ -118,7 +130,8 @@ export class PreviewRunner {
       port,
       logs: "",
       startedAt: new Date().toISOString(),
-      lastAccessedAt: Date.now()
+      lastAccessedAt: Date.now(),
+      dispose
     };
 
     const child = spawn(process.execPath, [this.options.viteBinPath, "--host", this.options.host, "--port", String(port), "--strictPort"], {
@@ -179,6 +192,7 @@ export class PreviewRunner {
     session.process = undefined;
     session.status = "stopped";
     this.pool.release(session.port);
+    void session.dispose?.(); // clean up a hydrated workspace dir (no-op for local)
     this.sessions.delete(sessionKey);
   }
 
@@ -214,8 +228,39 @@ export class PreviewRunner {
     }
   }
 
+  /** Build a project (materializes a working dir, builds, disposes it). */
   async build(projectId: string, options?: { base?: string }): Promise<BuildResult> {
-    return this.buildWorkspace(this.options.projectRootFor(projectId), options);
+    const ws = await this.options.materialize(projectId);
+    try {
+      return await this.buildWorkspace(ws.dir, options);
+    } finally {
+      await ws.dispose();
+    }
+  }
+
+  /** Build but keep the dist dir for the caller (e.g. to upload it); caller disposes. */
+  async buildAndKeep(
+    projectId: string,
+    options?: { base?: string }
+  ): Promise<{ build: BuildResult; distDir: string; dispose: () => Promise<void> }> {
+    const ws = await this.options.materialize(projectId);
+    try {
+      const build = await this.buildWorkspace(ws.dir, options);
+      return { build, distDir: path.join(ws.dir, "dist"), dispose: ws.dispose };
+    } catch (error) {
+      await ws.dispose();
+      throw error;
+    }
+  }
+
+  /** Visual-validate a project (materializes, validates, disposes). */
+  async validateProject(projectId: string): Promise<VisualValidationResult> {
+    const ws = await this.options.materialize(projectId);
+    try {
+      return await this.validateWorkspaceVisual(ws.dir);
+    } finally {
+      await ws.dispose();
+    }
   }
 
   async buildWorkspace(workspacePath: string, options?: { base?: string }): Promise<BuildResult> {

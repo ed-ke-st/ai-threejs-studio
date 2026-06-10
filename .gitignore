@@ -28,6 +28,8 @@ dist
 .studio/assets/*
 .studio/snapshots/*
 .studio/shares/*
+.studio/blobs/
+.studio/tmp/
 .studio/projects.json
 .studio/settings.json
 .studio/rag-index.json

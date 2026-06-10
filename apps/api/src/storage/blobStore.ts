@@ -13,6 +13,7 @@ export interface BlobStore {
   init(): Promise<void>;
   put(key: string, body: Buffer | string): Promise<void>;
   get(key: string): Promise<Buffer | null>;
+  delete(key: string): Promise<void>;
   list(prefix: string): Promise<string[]>;
   deletePrefix(prefix: string): Promise<void>;
 }
@@ -80,6 +81,10 @@ class LocalBlobStore implements BlobStore {
     }
   }
 
+  async delete(key: string): Promise<void> {
+    await fs.rm(this.toPath(key), { force: true });
+  }
+
   async list(prefix: string): Promise<string[]> {
     const base = this.toPath(prefix);
     const files = await walkFiles(base);
@@ -123,6 +128,11 @@ class SupabaseBlobStore implements BlobStore {
     const { data, error } = await this.client.storage.from(this.bucket).download(key);
     if (error || !data) return null; // download errors are effectively "not found" for serving
     return Buffer.from(await data.arrayBuffer());
+  }
+
+  async delete(key: string): Promise<void> {
+    const { error } = await this.client.storage.from(this.bucket).remove([key]);
+    if (error) throw error;
   }
 
   async list(prefix: string): Promise<string[]> {

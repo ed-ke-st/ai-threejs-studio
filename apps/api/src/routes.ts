@@ -168,25 +168,20 @@ export function registerRoutes(
     };
   }
 
-  async function isPreviewFresh(projectRoot: string): Promise<boolean> {
-    try {
-      const [dist, scene] = await Promise.all([
-        fs.stat(path.join(projectRoot, "dist", "index.html")),
-        fs.stat(path.join(projectRoot, SCENE_CONFIG_PATH))
-      ]);
-      return dist.mtimeMs >= scene.mtimeMs; // dist newer than the scene = up to date
-    } catch {
-      return false;
-    }
-  }
-
-  // Rebuilds only when the dist is missing/stale, so repeated Runtime views don't
-  // rebuild. Returns the build only when it failed.
-  async function ensureStaticPreview(id: string): Promise<{ session?: PreviewSession; build?: BuildResult }> {
-    if (!(await isPreviewFresh(storage.getProjectRoot(id)))) {
-      const build = await previewRunner.build(id, { base: "./" });
-      if (!build.ok) return { build };
-      await putDir(blobStore, `previews/${id}`, path.join(storage.getProjectRoot(id), "dist"));
+  // The preview is "fresh" when it was built from the project's current version.
+  // The marker stores the project.updatedAt the dist was built from (storage-backend
+  // agnostic, unlike a local-file mtime). Returns the build only when it failed.
+  async function ensureStaticPreview(id: string, version: string): Promise<{ session?: PreviewSession; build?: BuildResult }> {
+    const builtVersion = (await blobStore.get(`preview-meta/${id}`))?.toString("utf8");
+    if (builtVersion !== version) {
+      const { build, distDir, dispose } = await previewRunner.buildAndKeep(id, { base: "./" });
+      try {
+        if (!build.ok) return { build };
+        await putDir(blobStore, `previews/${id}`, distDir);
+        await blobStore.put(`preview-meta/${id}`, version);
+      } finally {
+        await dispose();
+      }
     }
     return { session: staticPreviewSession(id) };
   }
@@ -305,6 +300,7 @@ export function registerRoutes(
     await storage.deleteProject(id);
     await assetLibrary.deleteProjectAssets(id);
     await blobStore.deletePrefix(`previews/${id}`);
+    await blobStore.delete(`preview-meta/${id}`);
     await projectRepository.deleteProject(id);
 
     return reply.code(204).send();
@@ -550,7 +546,7 @@ export function registerRoutes(
     if (!project) return;
 
     if (config.previewMode === "static") {
-      const { session, build } = await ensureStaticPreview(id);
+      const { session, build } = await ensureStaticPreview(id, project.updatedAt);
       if (!session) return reply.code(422).send({ build });
       return { preview: session };
     }
@@ -566,7 +562,7 @@ export function registerRoutes(
     if (!project) return;
 
     if (config.previewMode === "static") {
-      const built = await isPreviewFresh(storage.getProjectRoot(id));
+      const built = (await blobStore.get(`preview-meta/${id}`)) !== null;
       return { preview: built ? staticPreviewSession(id) : null };
     }
 
@@ -656,14 +652,16 @@ export function registerRoutes(
 
     // Build a self-contained static bundle (relative asset paths) and upload it to
     // object storage. The shared scene renders with no dev server.
-    const build = await previewRunner.build(id, { base: "./" });
-    if (!build.ok) {
-      return reply.code(422).send({ build });
-    }
-
     const shareId = nanoid(12);
-    const distPath = path.join(storage.getProjectRoot(id), "dist");
-    await putDir(blobStore, `shares/${shareId}`, distPath);
+    const { build, distDir, dispose } = await previewRunner.buildAndKeep(id, { base: "./" });
+    try {
+      if (!build.ok) {
+        return reply.code(422).send({ build });
+      }
+      await putDir(blobStore, `shares/${shareId}`, distDir);
+    } finally {
+      await dispose();
+    }
 
     const host = request.headers.host ?? "127.0.0.1";
     const origin = `${request.protocol}://${host}`;
