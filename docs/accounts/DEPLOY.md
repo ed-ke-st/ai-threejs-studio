@@ -76,10 +76,16 @@ build any project** — no per-instance disk state for projects.
 | `WORKSPACE_BACKEND` | blob (prod) / local | workspace source backend |
 | `SUPABASE_STORAGE_BUCKET` | studio | bucket name |
 
+## Serving / CDN
+
+Bundle bytes skip the API: the small entry `index.html` streams through the API (so
+relative asset paths resolve back to it), but bundle sub-files (JS/CSS) and asset
+downloads **302-redirect to a short-lived signed Storage URL** — ownership is checked
+at the API before each redirect, and the heavy bytes come straight from Supabase
+Storage's CDN. Local storage streams everything (no signed URLs).
+
 ## Known limits
 
-- Bundles are currently **served through the API** from object storage. Offloading to
-  signed CDN URLs (so bytes don't transit the API) is a follow-up optimization.
 - **Preview/quota in-flight state is in-process** (the live-preview session map; the
   quota counters are in Postgres and fine). For >1 instance, live preview is off
   anyway (static mode), so this mainly means a build runs per instance until a CDN/
