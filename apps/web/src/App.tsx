@@ -43,7 +43,10 @@ export function App() {
       autoStartedRef.current = false;
       return;
     }
-    if (!preview && !isPreviewStarting && !autoStartedRef.current) {
+    // Static preview (port 0) is a built bundle, so re-check freshness on each
+    // Runtime entry (rebuilds only if stale). Live preview (port > 0) starts once.
+    const isStatic = preview?.port === 0;
+    if ((!preview || isStatic) && !isPreviewStarting && !autoStartedRef.current) {
       autoStartedRef.current = true;
       void startPreview();
     }

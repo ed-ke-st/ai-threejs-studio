@@ -26,6 +26,11 @@ export const config = {
   // pooled/reclaimed (not leaked) within [basePort, basePort + maxConcurrent + 4).
   previewMaxConcurrent: Number(process.env.PREVIEW_MAX_CONCURRENT ?? 4),
   previewIdleTimeoutMs: Number(process.env.PREVIEW_IDLE_TIMEOUT_MS ?? 300_000),
+  // "static" serves the runtime preview as the project's built dist through the
+  // authed API (no live dev server / raw ports) — the production architecture
+  // (swap local disk for object storage + CDN at deploy time). "live" keeps the
+  // local dev server for fast iteration. Default: static in production.
+  previewMode: (process.env.PREVIEW_MODE as "live" | "static") ?? (process.env.NODE_ENV === "production" ? "static" : "live"),
   viteBinPath: path.resolve(repoRoot, "node_modules/vite/bin/vite.js"),
   chromeBinPath:
     process.env.CHROME_BIN_PATH ??

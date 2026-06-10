@@ -3,7 +3,7 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import type { FastifyInstance } from "fastify";
 import { getTemplate } from "@ai-threejs-studio/three-templates";
-import type { AppSettingsUpdate, Project, ProjectShare } from "@ai-threejs-studio/shared";
+import type { AppSettingsUpdate, BuildResult, PreviewSession, Project, ProjectShare } from "@ai-threejs-studio/shared";
 import { z } from "zod";
 import { createScene3DSceneFiles, defaultScene3D } from "@ai-threejs-studio/scene3d/codegen";
 import { SCENE_CONFIG_PATH, validateScene3D } from "@ai-threejs-studio/scene3d";
@@ -150,6 +150,42 @@ export function registerRoutes(
       return null;
     }
     return project;
+  }
+
+  // --- Static (hosted) preview: serve the project's built dist through the authed
+  // API. The production architecture — at deploy time the dist read/write moves to
+  // object storage + a signed CDN URL; the flow here is otherwise unchanged.
+  function staticPreviewSession(id: string): PreviewSession {
+    return {
+      projectId: id,
+      status: "running",
+      url: `/api/projects/${id}/preview/app/`, // browser-relative; goes through the API
+      port: 0, // 0 signals "static" to the client (no live dev server)
+      logs: "",
+      startedAt: new Date().toISOString()
+    };
+  }
+
+  async function isPreviewFresh(projectRoot: string): Promise<boolean> {
+    try {
+      const [dist, scene] = await Promise.all([
+        fs.stat(path.join(projectRoot, "dist", "index.html")),
+        fs.stat(path.join(projectRoot, SCENE_CONFIG_PATH))
+      ]);
+      return dist.mtimeMs >= scene.mtimeMs; // dist newer than the scene = up to date
+    } catch {
+      return false;
+    }
+  }
+
+  // Rebuilds only when the dist is missing/stale, so repeated Runtime views don't
+  // rebuild. Returns the build only when it failed.
+  async function ensureStaticPreview(id: string): Promise<{ session?: PreviewSession; build?: BuildResult }> {
+    if (!(await isPreviewFresh(storage.getProjectRoot(id)))) {
+      const build = await previewRunner.build(id, { base: "./" });
+      if (!build.ok) return { build };
+    }
+    return { session: staticPreviewSession(id) };
   }
 
   app.get("/health", async () => ({
@@ -510,6 +546,12 @@ export function registerRoutes(
 
     if (!project) return;
 
+    if (config.previewMode === "static") {
+      const { session, build } = await ensureStaticPreview(id);
+      if (!session) return reply.code(422).send({ build });
+      return { preview: session };
+    }
+
     const preview = await previewRunner.start(id);
     return { preview };
   });
@@ -520,7 +562,42 @@ export function registerRoutes(
 
     if (!project) return;
 
+    if (config.previewMode === "static") {
+      const built = await isPreviewFresh(storage.getProjectRoot(id));
+      return { preview: built ? staticPreviewSession(id) : null };
+    }
+
     return { preview: previewRunner.get(id) };
+  });
+
+  // Authed static serve of the built dist (used when previewMode === "static").
+  app.get("/projects/:id/preview/app", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    return reply.redirect(`/projects/${id}/preview/app/`);
+  });
+
+  app.get("/projects/:id/preview/app/*", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = await requireOwnedProject(request, reply, id);
+    if (!project) return;
+
+    const wildcard = (request.params as Record<string, string>)["*"] || "index.html";
+    const distDir = path.join(storage.getProjectRoot(id), "dist");
+    const target = path.resolve(distDir, wildcard === "" ? "index.html" : wildcard);
+    if (target !== distDir && !target.startsWith(`${distDir}${path.sep}`)) {
+      return reply.code(403).send({ error: "Invalid path" });
+    }
+
+    try {
+      const content = await fs.readFile(target);
+      return reply.type(shareContentType(target)).send(content);
+    } catch {
+      try {
+        return reply.type("text/html; charset=utf-8").send(await fs.readFile(path.join(distDir, "index.html")));
+      } catch {
+        return reply.code(404).send({ error: "Preview not built yet." });
+      }
+    }
   });
 
   app.post("/projects/:id/build", async (request, reply) => {
