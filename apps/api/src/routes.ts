@@ -135,7 +135,6 @@ export function registerRoutes(
   settingsRepository: SettingsRepository,
   usageService: UsageService
 ): void {
-  const shares = new Map<string, ProjectShare>();
   const blobStore = getBlobStore();
 
   // Loads a project and enforces ownership. On a missing OR not-owned project it
@@ -669,7 +668,6 @@ export function registerRoutes(
       url: `${origin}/shares/${shareId}/`,
       createdAt: new Date().toISOString()
     };
-    shares.set(shareId, share);
     return reply.code(201).send({ share });
   });
 }

@@ -24,6 +24,29 @@ Supabase Auth (login)          API container (this Dockerfile)
   writes the workspace).
 - **Postgres** is Supabase (already used).
 
+## Web (Vercel)
+
+The web app is a static Vite SPA, so **Vercel works** (Netlify/Cloudflare Pages too).
+The API itself can **not** run on Vercel — it's a long-lived stateful container that
+spawns `vite`/Chromium, so it goes on a container host (Fly/Railway/Render); Vercel
+hosts only the static frontend.
+
+Setup:
+- Vercel project **Root Directory = `apps/web`** (it's a pnpm workspace; Vercel installs
+  from the repo root and builds `apps/web`). Build: `vite build`, output `dist`.
+- **Build-time env**: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (baked into the bundle).
+- **`apps/web/vercel.json`** rewrites `/api/*` → the API container (stripping `/api`,
+  mirroring the dev Vite proxy) — set `YOUR-API-HOST` to the deployed API origin. This
+  keeps every frontend URL relative, including the preview path (`/api/.../preview/app/`),
+  and the signed-URL redirects go straight from the browser to Supabase Storage.
+
+The whole flow works through this: iframe loads `/api/.../preview/app/` → Vercel rewrite
+→ API serves `index.html` → its `./assets/*.js` → Vercel rewrite → API 302 → Supabase CDN.
+
+> Streaming note: `agent-run` returns a long NDJSON stream. Vercel's rewrite proxies it
+> fine in practice; if you ever see it buffered/cut off, point that one call at the API's
+> absolute origin (CORS is already enabled on the API) instead of the rewrite.
+
 ## API container
 
 ```bash
