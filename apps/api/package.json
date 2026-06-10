@@ -18,6 +18,7 @@
     "@ai-threejs-studio/three-templates": "workspace:*",
     "@anthropic-ai/sdk": "^0.100.1",
     "@fastify/cors": "^10.0.1",
+    "@supabase/supabase-js": "^2.107.0",
     "archiver": "^8.0.0",
     "dotenv": "^16.5.0",
     "fastify": "^5.3.3",

@@ -81,6 +81,9 @@ importers:
       '@fastify/cors':
         specifier: ^10.0.1
         version: 10.1.0
+      '@supabase/supabase-js':
+        specifier: ^2.107.0
+        version: 2.107.0
       archiver:
         specifier: ^8.0.0
         version: 8.0.0

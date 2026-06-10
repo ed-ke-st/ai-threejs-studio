@@ -75,8 +75,18 @@ export const config = {
     allowPlatformKeys: process.env.ALLOW_PLATFORM_KEYS === "true"
   },
   supabaseDbUrl,
+  // service_role / sb_secret_ key — used for Supabase Storage admin (bucket + blobs).
+  supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
   // Secret that encrypts per-user provider keys at rest (required when auth is on).
   settingsEncKey: process.env.SETTINGS_ENC_KEY,
+  // Object storage for served/durable bundles (shares, assets, preview dist).
+  // "local" (disk) in dev, "supabase" (Storage) in production. The build still
+  // runs on a local working dir; only the served artifacts move to object storage.
+  blob: {
+    backend: (process.env.BLOB_BACKEND as "local" | "supabase") ?? (process.env.NODE_ENV === "production" ? "supabase" : "local"),
+    bucket: process.env.SUPABASE_STORAGE_BUCKET ?? "studio",
+    localRoot: path.resolve(repoRoot, process.env.STUDIO_BLOB_ROOT ?? ".studio/blobs")
+  },
   // Per-user daily quotas (multi-tenant only). Protect server resources now, and
   // become the cost cap if platform/test tokens are ever enabled. <= 0 = unlimited.
   quota: {
