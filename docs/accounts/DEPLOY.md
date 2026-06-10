@@ -53,13 +53,25 @@ docker run -p 4000:4000 \
 | `QUOTA_AGENT_RUNS_PER_DAY` | 100 | per-user/day generation cap |
 | `QUOTA_BUILDS_PER_DAY` | 200 | per-user/day build cap |
 
+## Object storage
+
+Served/durable bundles — **shares, uploaded assets, and the static preview dist** —
+go through a `BlobStore`: `BLOB_BACKEND=supabase` uses Supabase Storage (bucket
+`SUPABASE_STORAGE_BUCKET`, default `studio`, via `SUPABASE_SERVICE_ROLE_KEY`),
+`local` uses disk. Defaults to `supabase` in production. The bucket is created at
+startup. So those artifacts survive restarts and are instance-independent.
+
+| Env | Default | Purpose |
+|---|---|---|
+| `BLOB_BACKEND` | supabase (prod) / local | object-storage backend |
+| `SUPABASE_STORAGE_BUCKET` | studio | bucket name |
+
 ## Known limits (single-instance, for now)
 
-- **Project files + preview/share bundles live on the `/app/.studio` volume**, so
-  run **one** API instance. Horizontal scaling needs object storage (S3/R2) for those
-  bundles + serving private previews via signed CDN URLs — the planned next step;
-  the static-preview flow already isolates the read/write so only the storage backend
-  changes.
-- Preview/quota in-flight state is in-process; multi-instance also needs that
-  externalized.
+- **The project *working* files still live on the `/app/.studio` volume** (the build
+  runs on local disk), so editing/building is single-instance. True multi-instance
+  needs the workspace source in object storage with hydrate-before-build (increment B).
+- Bundles are currently **served through the API** from object storage. Offloading to
+  signed CDN URLs (so bytes don't transit the API) is a follow-up optimization.
+- Preview/quota in-flight state is in-process; multi-instance also needs that externalized.
 - The live preview runner (`PREVIEW_MODE=live`) is for local/single-tenant dev only.
