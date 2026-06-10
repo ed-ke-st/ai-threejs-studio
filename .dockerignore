@@ -1,0 +1,17 @@
+node_modules
+**/node_modules
+**/dist
+.studio
+.git
+.env
+.env.*
+!.env.example
+.pnpm-store
+.turbo
+.vite
+.codex
+.gemini
+.claude
+*.tsbuildinfo
+.DS_Store
+**/.chrome-visual-validation-*
