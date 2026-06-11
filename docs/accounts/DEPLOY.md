@@ -1,7 +1,32 @@
 # Deploying ai-threejs-studio (multi-tenant)
 
-The honest current shape: **single API container + Supabase Postgres + a static web
-host**, with project files on a persistent volume until they move to object storage.
+Shape: **API container + Supabase (Postgres + Storage + Auth) + a static web host.**
+Projects, bundles, and uploads all live in object storage, so the API container is
+effectively stateless and any instance can serve any request.
+
+## Go live: Railway (API) + Vercel (web)
+
+One-time, in order:
+
+1. **Supabase** (already set up): confirm both migrations are applied, the `studio`
+   Storage bucket exists, JWT signing keys are asymmetric, and set up **custom SMTP**
+   + the **Site URL / redirect allowlist** to your web domain (Auth settings).
+2. **API on Railway** — new project → Deploy from this repo. `railway.json` builds the
+   `Dockerfile`. Set these service **Variables** (Railway injects `PORT`; the image
+   already sets `API_HOST=0.0.0.0` + `NODE_ENV=production`):
+   - `SUPABASE_URL`, `SUPABASE_DB_URL` (session pooler, port 5432), `SUPABASE_SERVICE_ROLE_KEY`
+   - `SETTINGS_ENC_KEY` — **fixed forever** (rotating it orphans every stored user key)
+   - `PUBLIC_API_BASE_URL` = the Railway public URL (e.g. `https://<svc>.up.railway.app`)
+   - `ALLOW_PLATFORM_KEYS=false`, `QUOTA_AGENT_RUNS_PER_DAY`, `QUOTA_BUILDS_PER_DAY`
+   - optional: `CORS_ORIGIN=https://<your-web-domain>`
+   Then **Generate Domain** to get the public URL. Heads-up: `vite build` + Chromium are
+   memory-hungry (≈2–3 GB with `BUILD_MAX_CONCURRENT=2`) — watch for OOM on small plans.
+3. **Web on Vercel** — import the repo, **Root Directory = `apps/web`**. Build env:
+   `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`. Edit `apps/web/vercel.json` →
+   `YOUR-API-HOST` = the Railway URL host. Deploy.
+4. **Smoke test**: open the Vercel URL → sign up (email confirm) → add an Anthropic/OpenAI
+   key in Settings → generate a scene → open Runtime → share. (No projects appear for a
+   new account until you run `scripts/backfill-projects.ts` for that user, if desired.)
 
 ## Topology
 

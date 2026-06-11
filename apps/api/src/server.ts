@@ -38,7 +38,7 @@ for (const warning of validateConfig()) {
 }
 
 await app.register(cors, {
-  origin: true
+  origin: config.corsOrigin ?? true
 });
 
 // Resolves request.userId (Supabase JWT in multi-tenant mode; constant local owner

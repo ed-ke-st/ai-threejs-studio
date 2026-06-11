@@ -17,7 +17,12 @@ const authEnabled = Boolean(supabaseUrl && supabaseDbUrl);
 
 export const config = {
   host: process.env.API_HOST ?? "127.0.0.1",
-  port: Number(process.env.API_PORT ?? 4000),
+  // PORT is the cloud convention (Railway/Render inject it); fall back to API_PORT.
+  port: Number(process.env.PORT ?? process.env.API_PORT ?? 4000),
+  // Restrict browser cross-origin access (comma-separated origins). Unset = allow
+  // any origin — fine when the web app reaches the API via a same-origin proxy
+  // (e.g. the Vercel /api rewrite), where CORS isn't triggered.
+  corsOrigin: process.env.CORS_ORIGIN?.split(",").map((o) => o.trim()).filter(Boolean),
   publicApiBaseUrl: process.env.PUBLIC_API_BASE_URL ?? `http://${process.env.API_HOST ?? "127.0.0.1"}:${Number(process.env.API_PORT ?? 4000)}`,
   previewHost: process.env.PREVIEW_HOST ?? "127.0.0.1",
   previewBasePort: Number(process.env.PREVIEW_BASE_PORT ?? 4300),
