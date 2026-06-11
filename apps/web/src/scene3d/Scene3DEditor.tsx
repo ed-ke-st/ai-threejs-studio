@@ -46,6 +46,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   const [agentError, setAgentError] = useState<string | null>(null);
   const usage = useProjectStore((s) => s.usage);
   const loadUsage = useProjectStore((s) => s.loadUsage);
+  const logError = useProjectStore((s) => s.logError);
   const [liveBuild, setLiveBuild] = useState(true);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
@@ -322,13 +323,16 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
           .json()
           .then((body: { error?: string }) => body?.error)
           .catch(() => null);
-        setAgentError(message || `Generation failed (${response.status}).`);
+        const detail = message || `Generation failed (${response.status}).`;
+        setAgentError(detail);
+        logError(mode === "refine" ? "Refine failed" : "Generation failed", detail);
         setSaveState("error");
         return;
       }
 
       // Read the newline-delimited stream: progress | partial-node | result | error.
       let result: { scene: Scene3D } | null = null;
+      let streamError: string | null = null;
       if (response.ok && response.body) {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -343,12 +347,13 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
             buffer = buffer.slice(newline + 1);
             if (!line) continue;
             try {
-              const event = JSON.parse(line) as { type: string; stage?: string; node?: SceneNode; result?: { scene: Scene3D } };
+              const event = JSON.parse(line) as { type: string; stage?: string; node?: SceneNode; result?: { scene: Scene3D }; message?: string };
               if (event.type === "progress" && event.stage) setStage(event.stage);
               else if (event.type === "partial-node" && event.node && streaming) {
                 const node = event.node;
                 setScene((current) => (current ? { ...current, nodes: [...current.nodes, node] } : current));
               } else if (event.type === "result" && event.result) result = event.result;
+              else if (event.type === "error" && event.message) streamError = event.message;
             } catch {
               // ignore partial/non-JSON lines
             }
@@ -360,16 +365,22 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
         setScene(result.scene); // settle to the validated final scene
         setSaveState("saved");
       } else {
+        const detail = streamError || "Generation failed (no scene was returned).";
+        setAgentError(detail);
+        logError(mode === "refine" ? "Refine failed" : "Generation failed", detail);
         setSaveState("error");
       }
-    } catch {
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : "Generation failed.";
+      setAgentError(detail);
+      logError(mode === "refine" ? "Refine failed" : "Generation failed", detail);
       setSaveState("error");
     } finally {
       setGenerating(false);
       setStage("");
       void loadUsage(); // reflect the consumed (or blocked) generation
     }
-  }, [projectId, prompt, mode, liveBuild, primaryId, styleId, modifierIds, scene, recordHistory, loadUsage]);
+  }, [projectId, prompt, mode, liveBuild, primaryId, styleId, modifierIds, scene, recordHistory, loadUsage, logError]);
 
   const deleteSelected = useCallback(() => {
     const prev = sceneRef.current;
