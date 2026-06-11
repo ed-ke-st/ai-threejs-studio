@@ -155,6 +155,7 @@ function ModelRow({ label, value, options, onChange }: { label: string; value: s
 function SettingsPanel() {
   const settings = useProjectStore((s) => s.settings);
   const updateSettings = useProjectStore((s) => s.updateSettings);
+  const logError = useProjectStore((s) => s.logError);
   const [openAiKey, setOpenAiKey] = useState("");
   const [geminiKey, setGeminiKey] = useState("");
   const [anthropicKey, setAnthropicKey] = useState("");
@@ -166,7 +167,9 @@ function SettingsPanel() {
     try {
       await updateSettings(patch);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      logError("Couldn’t save settings", message);
     }
   };
 

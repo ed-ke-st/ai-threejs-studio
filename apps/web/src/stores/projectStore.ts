@@ -26,6 +26,14 @@ export interface UsageSnapshot {
   build: QuotaSnapshot;
 }
 
+export interface LogEntry {
+  id: number;
+  time: string;
+  level: "error" | "info";
+  title: string;
+  detail?: string;
+}
+
 interface ProjectState {
   health: "checking" | "connected" | "offline";
   projects: Project[];
@@ -60,6 +68,10 @@ interface ProjectState {
   updateSettings: (patch: AppSettingsUpdate) => Promise<void>;
   usage: UsageSnapshot | null;
   loadUsage: () => Promise<void>;
+  logs: LogEntry[];
+  logError: (title: string, detail?: string) => void;
+  logInfo: (title: string, detail?: string) => void;
+  clearLogs: () => void;
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -76,11 +88,26 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   share: null,
   settings: null,
   usage: null,
+  logs: [],
   busy: false,
   toast: null,
 
   clearToast() {
     set({ toast: null });
+  },
+
+  logError(title, detail) {
+    const entry: LogEntry = { id: Date.now() + Math.random(), time: new Date().toLocaleTimeString(), level: "error", title, detail };
+    set((state) => ({ logs: [entry, ...state.logs].slice(0, 50) }));
+  },
+
+  logInfo(title, detail) {
+    const entry: LogEntry = { id: Date.now() + Math.random(), time: new Date().toLocaleTimeString(), level: "info", title, detail };
+    set((state) => ({ logs: [entry, ...state.logs].slice(0, 50) }));
+  },
+
+  clearLogs() {
+    set({ logs: [] });
   },
 
   async checkHealth() {
@@ -110,6 +137,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       });
       await get().loadProjects();
       set({ selectedProjectId: data.project.id, previewSurface: "editor", preview: null, buildResult: null, share: null, statusMessage: `Created ${data.project.name}` });
+    } catch (error) {
+      get().logError("Couldn’t create project", error instanceof Error ? error.message : String(error));
+      set({ statusMessage: "Couldn’t create project" });
     } finally {
       set({ busy: false });
     }
@@ -140,6 +170,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const data = await api<{ preview: PreviewSession }>(`/projects/${projectId}/preview/start`, { method: "POST" });
       set((state) => ({ preview: data.preview, previewFrameKey: state.previewFrameKey + 1, statusMessage: `Preview ${data.preview.status}` }));
+    } catch (error) {
+      get().logError("Preview failed to start", error instanceof Error ? error.message : String(error));
+      set({ statusMessage: "Preview failed to start" });
     } finally {
       set({ isPreviewStarting: false });
     }
@@ -155,9 +188,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ isBuilding: true, statusMessage: "Building…" });
     try {
       const data = await api<{ build: BuildResult }>(`/projects/${projectId}/build`, { method: "POST" });
+      if (!data.build.ok) {
+        get().logError("Build failed", data.build.errorSummary || data.build.logs);
+      }
       set({ buildResult: data.build, statusMessage: data.build.ok ? "Build passed" : "Build failed" });
     } catch (error) {
-      set({ statusMessage: error instanceof Error ? error.message : "Build failed" });
+      const message = error instanceof Error ? error.message : "Build failed";
+      get().logError("Build failed", message);
+      set({ statusMessage: message });
     } finally {
       set({ isBuilding: false });
       void get().loadUsage();
@@ -168,8 +206,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const projectId = get().selectedProjectId;
     if (!projectId) return;
     set({ statusMessage: "Creating share link…" });
-    const data = await api<{ share: ProjectShare }>(`/projects/${projectId}/share`, { method: "POST" });
-    set({ share: data.share, statusMessage: "Share link created" });
+    try {
+      const data = await api<{ share: ProjectShare }>(`/projects/${projectId}/share`, { method: "POST" });
+      set({ share: data.share, statusMessage: "Share link created" });
+    } catch (error) {
+      get().logError("Couldn’t create share link", error instanceof Error ? error.message : String(error));
+      set({ statusMessage: "Couldn’t create share link" });
+    }
   },
 
   async exportSourceArchive() {

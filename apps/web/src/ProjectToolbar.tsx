@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useProjectStore } from "./stores/projectStore";
-import { DownloadIcon, KebabIcon, RefreshIcon, RestartIcon, ShareIcon } from "./ui/icons";
+import { CloseIcon, DownloadIcon, InfoIcon, KebabIcon, RefreshIcon, RestartIcon, ShareIcon } from "./ui/icons";
 import styles from "./App.module.css";
 
 export function ProjectToolbar() {
@@ -19,10 +19,13 @@ export function ProjectToolbar() {
   const shareProject = useProjectStore((s) => s.shareProject);
   const exportSourceArchive = useProjectStore((s) => s.exportSourceArchive);
   const exportBuildArchive = useProjectStore((s) => s.exportBuildArchive);
+  const logs = useProjectStore((s) => s.logs);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [sharePending, setSharePending] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
+  const errorCount = logs.filter((entry) => entry.level === "error").length;
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -72,6 +75,16 @@ export function ProjectToolbar() {
           Runtime
         </button>
       </div>
+
+      <button
+        className={errorCount > 0 ? `${styles.iconButton} ${styles.iconButtonAlert}` : styles.iconButton}
+        onClick={() => setLogOpen(true)}
+        aria-label="Activity log"
+        title={errorCount > 0 ? `${errorCount} error${errorCount > 1 ? "s" : ""} — open log` : "Activity log"}
+      >
+        <InfoIcon />
+        {errorCount > 0 ? <span className={styles.logBadge}>{errorCount}</span> : null}
+      </button>
 
       <span className={styles.spacer} />
 
@@ -128,6 +141,52 @@ export function ProjectToolbar() {
       </div>
 
       {shareOpen && share ? <ShareDialog url={share.url} onClose={() => setShareOpen(false)} /> : null}
+      {logOpen ? <LogModal onClose={() => setLogOpen(false)} /> : null}
+    </div>
+  );
+}
+
+function LogModal({ onClose }: { onClose: () => void }) {
+  const logs = useProjectStore((s) => s.logs);
+  const clearLogs = useProjectStore((s) => s.clearLogs);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className={styles.overlayBackdrop} onClick={onClose}>
+      <div className={styles.logCard} onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
+        <div className={styles.logHeader}>
+          <span className={styles.logTitle}>Activity log</span>
+          <span className={styles.spacer} />
+          <button className={styles.ghost} disabled={logs.length === 0} onClick={clearLogs}>
+            Clear
+          </button>
+          <button className={styles.iconButton} onClick={onClose} aria-label="Close">
+            <CloseIcon />
+          </button>
+        </div>
+        {logs.length === 0 ? (
+          <p className={styles.logEmpty}>No errors or messages yet.</p>
+        ) : (
+          <div className={styles.logList}>
+            {logs.map((entry) => (
+              <details key={entry.id} className={entry.level === "error" ? styles.logEntryError : styles.logEntry} open={entry.level === "error"}>
+                <summary>
+                  <span className={styles.logTime}>{entry.time}</span>
+                  {entry.title}
+                </summary>
+                {entry.detail ? <pre>{entry.detail}</pre> : null}
+              </details>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

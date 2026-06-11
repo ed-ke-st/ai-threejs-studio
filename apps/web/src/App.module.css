@@ -95,6 +95,7 @@
 }
 
 .iconButton {
+  position: relative;
   display: grid;
   place-items: center;
   width: 30px;
@@ -109,6 +110,108 @@
 .iconButton:hover {
   border-color: var(--c-accent);
   color: var(--c-text);
+}
+
+.iconButtonAlert {
+  color: var(--c-danger);
+  border-color: var(--c-danger);
+}
+
+.logBadge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  background: var(--c-danger);
+  border-radius: 999px;
+}
+
+.logCard {
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(70vh, 640px);
+  display: flex;
+  flex-direction: column;
+  background: var(--c-bg-panel);
+  border: 1px solid #223047;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+  padding: 16px;
+  color: var(--c-text);
+}
+
+.logHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.logTitle {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.logEmpty {
+  color: var(--c-text-muted);
+  font-size: 13px;
+  margin: 8px 0;
+}
+
+.logList {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.logEntry,
+.logEntryError {
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--radius);
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+.logEntryError {
+  border-color: var(--c-danger);
+}
+
+.logEntry summary,
+.logEntryError summary {
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.logEntryError summary {
+  color: var(--c-danger);
+}
+
+.logTime {
+  color: var(--c-text-dim);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+
+.logEntry pre,
+.logEntryError pre {
+  margin: 8px 0 2px;
+  padding: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--c-bg-shell);
+  border-radius: var(--radius-sm);
+  color: var(--c-text);
+  font-size: 11px;
 }
 
 .menuPopover {
