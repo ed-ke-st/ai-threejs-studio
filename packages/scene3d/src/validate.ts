@@ -4,11 +4,21 @@
 // throws — a best-effort scene always comes back so preview/repair can proceed.
 
 import {
+  ANIMATABLE_PROPERTIES,
+  CAMERA_TYPES,
+  EASINGS,
   GEOMETRY_KINDS,
   TEXTURE_PATTERNS,
   normalizeTransform,
+  type AnimatableProperty,
+  type Animation,
+  type AnimationTrack,
+  type Camera,
+  type CameraType,
+  type Easing,
   type Geometry,
   type GeometryKind,
+  type Keyframe,
   type LightKind,
   type Material,
   type Scene3D,
@@ -157,6 +167,13 @@ export function validateScene3D(input: unknown): Scene3DValidationResult {
     warn("Scene defines no lights; relying on defaults only.");
   }
 
+  const cameras = normalizeCameras(root.cameras, warn);
+  const activeCameraId = typeof root.activeCameraId === "string" && cameras.some((c) => c.id === root.activeCameraId)
+    ? root.activeCameraId
+    : cameras.length > 0
+      ? cameras[0].id
+      : undefined;
+
   const scene: Scene3D = {
     metadata: { name: isRecord(root.metadata) && typeof root.metadata.name === "string" ? root.metadata.name : undefined, version: 1 },
     background: asColor(root.background),
@@ -165,6 +182,9 @@ export function validateScene3D(input: unknown): Scene3DValidationResult {
       ? { preset: typeof root.environment.preset === "string" ? root.environment.preset : undefined, intensity: asNumber(root.environment.intensity) }
       : undefined,
     camera: normalizeCamera(root.camera) ?? capturedCamera,
+    cameras: cameras.length > 0 ? cameras : undefined,
+    activeCameraId,
+    animation: normalizeAnimation(root.animation, warn),
     nodes
   };
 
@@ -249,6 +269,91 @@ function normalizeCamera(raw: unknown): Scene3D["camera"] {
     target: asVec3(raw.target),
     fov: asNumber(raw.fov)
   };
+}
+
+function normalizeCameras(raw: unknown, warn: (m: string) => void): Camera[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const cameras: Camera[] = [];
+  raw.forEach((entry, index) => {
+    if (!isRecord(entry)) {
+      warn(`Camera at cameras[${index}] is not an object; skipped.`);
+      return;
+    }
+    let id = typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : `camera-${index + 1}`;
+    while (seen.has(id)) id = `${id}-${index + 1}`;
+    seen.add(id);
+    const type: CameraType = CAMERA_TYPES.includes(entry.type as CameraType) ? (entry.type as CameraType) : "perspective";
+    cameras.push({
+      id,
+      name: typeof entry.name === "string" ? entry.name : `Camera ${index + 1}`,
+      type,
+      position: asVec3(entry.position),
+      target: asVec3(entry.target),
+      fov: asNumber(entry.fov),
+      zoom: asNumber(entry.zoom),
+      near: asNumber(entry.near),
+      far: asNumber(entry.far)
+    });
+  });
+  return cameras;
+}
+
+function normalizeAnimation(raw: unknown, warn: (m: string) => void): Animation | undefined {
+  if (!isRecord(raw)) return undefined;
+  const rawTracks = Array.isArray(raw.tracks) ? raw.tracks : [];
+  const seen = new Set<string>();
+  const tracks: AnimationTrack[] = [];
+  rawTracks.forEach((entry, index) => {
+    if (!isRecord(entry)) {
+      warn(`Animation track at tracks[${index}] is not an object; skipped.`);
+      return;
+    }
+    const targetId = typeof entry.targetId === "string" && entry.targetId.trim() ? entry.targetId.trim() : undefined;
+    if (!targetId) {
+      warn(`Animation track at tracks[${index}] has no targetId; skipped.`);
+      return;
+    }
+    const property = ANIMATABLE_PROPERTIES.includes(entry.property as AnimatableProperty)
+      ? (entry.property as AnimatableProperty)
+      : undefined;
+    if (!property) {
+      warn(`Animation track at tracks[${index}] has invalid property "${String(entry.property)}"; skipped.`);
+      return;
+    }
+    const keyframes = normalizeKeyframes(entry.keyframes);
+    if (keyframes.length === 0) {
+      warn(`Animation track at tracks[${index}] has no keyframes; skipped.`);
+      return;
+    }
+    let id = typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : `track-${index + 1}`;
+    while (seen.has(id)) id = `${id}-${index + 1}`;
+    seen.add(id);
+    tracks.push({ id, targetId, property, keyframes });
+  });
+  if (tracks.length === 0) return undefined;
+  const latest = tracks.reduce((max, t) => Math.max(max, t.keyframes[t.keyframes.length - 1].time), 0);
+  const duration = asNumber(raw.duration);
+  return {
+    duration: typeof duration === "number" && duration > 0 ? duration : latest,
+    loop: raw.loop === false ? false : true,
+    tracks
+  };
+}
+
+function normalizeKeyframes(raw: unknown): Keyframe[] {
+  if (!Array.isArray(raw)) return [];
+  const keyframes: Keyframe[] = [];
+  for (const entry of raw) {
+    if (!isRecord(entry)) continue;
+    const time = asNumber(entry.time);
+    const value = asNumber(entry.value);
+    if (typeof time !== "number" || typeof value !== "number") continue;
+    const easing: Easing | undefined = EASINGS.includes(entry.easing as Easing) ? (entry.easing as Easing) : undefined;
+    keyframes.push({ time: Math.max(0, time), value, easing });
+  }
+  // The renderer assumes keyframes are time-sorted.
+  return keyframes.sort((a, b) => a.time - b.time);
 }
 
 function countRenderable(nodes: SceneNode[]): number {

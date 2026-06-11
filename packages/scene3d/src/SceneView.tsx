@@ -5,10 +5,13 @@
 // editor preview, the shared static viewer, and (via the same JSON) on-demand
 // code export. Nothing here is bespoke per scene — richness comes from the data.
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import { useFrame, useThree } from "@react-three/fiber";
 import { Center, Clone, Edges, Environment, Html, useGLTF } from "@react-three/drei";
 import type {
+  AnimatableProperty,
+  Animation,
   Geometry,
   LightNode,
   Material,
@@ -18,7 +21,7 @@ import type {
   SceneNode,
   TextureSpec
 } from "./schema";
-import { normalizeTransform } from "./schema";
+import { animationDuration, normalizeTransform, sampleTrack } from "./schema";
 
 interface SceneViewProps {
   scene: Scene3D;
@@ -26,9 +29,12 @@ interface SceneViewProps {
   /** Multi-selection. When provided, every listed node is highlighted; takes precedence over selectedId. */
   selectedIds?: string[];
   onSelect?: (id: string) => void;
+  /** Controlled playback time (seconds). When set, animation is driven to exactly this
+   *  time each frame (editor scrubbing/playhead). When omitted, animation autoplays/loops. */
+  animationTime?: number;
 }
 
-export function SceneView({ scene, selectedId, selectedIds, onSelect }: SceneViewProps) {
+export function SceneView({ scene, selectedId, selectedIds, onSelect, animationTime }: SceneViewProps) {
   const ids = selectedIds ?? (selectedId ? [selectedId] : []);
   return (
     <>
@@ -37,11 +43,76 @@ export function SceneView({ scene, selectedId, selectedIds, onSelect }: SceneVie
       {scene.environment?.preset ? (
         <Environment preset={scene.environment.preset as never} environmentIntensity={scene.environment.intensity ?? 1} />
       ) : null}
+      {scene.animation && scene.animation.tracks.length > 0 ? (
+        <AnimationDriver animation={scene.animation} time={animationTime} />
+      ) : null}
       {scene.nodes.map((node) => (
         <NodeView key={node.id} node={node} selectedIds={ids} onSelect={onSelect} />
       ))}
     </>
   );
+}
+
+// Drives keyframe animation imperatively. Each frame it advances (or reads the
+// controlled) time, samples every track, and mutates the matching node's Object3D
+// directly — found by name (NodeView sets name={node.id}). Mutating refs instead
+// of React state keeps playback off the render path. Camera-target tracks are a
+// no-op here (no object by that name); the camera UI phase handles those.
+function AnimationDriver({ animation, time }: { animation: Animation; time?: number }) {
+  const root = useThree((state) => state.scene);
+  const clock = useRef(0);
+  const duration = useMemo(() => animationDuration(animation), [animation]);
+
+  useFrame((_, delta) => {
+    let t: number;
+    if (typeof time === "number") {
+      t = time;
+    } else if (duration > 0) {
+      clock.current += delta;
+      t = animation.loop === false ? Math.min(clock.current, duration) : clock.current % duration;
+    } else {
+      t = 0;
+    }
+    for (const track of animation.tracks) {
+      const obj = root.getObjectByName(track.targetId);
+      if (!obj) continue;
+      const value = sampleTrack(track, t);
+      if (value === undefined) continue;
+      applyAnimatedProperty(obj, track.property, value);
+    }
+  });
+
+  return null;
+}
+
+function applyAnimatedProperty(obj: THREE.Object3D, property: AnimatableProperty, value: number): void {
+  switch (property) {
+    case "position.x": obj.position.x = value; break;
+    case "position.y": obj.position.y = value; break;
+    case "position.z": obj.position.z = value; break;
+    case "rotation.x": obj.rotation.x = value; break;
+    case "rotation.y": obj.rotation.y = value; break;
+    case "rotation.z": obj.rotation.z = value; break;
+    case "scale.x": obj.scale.x = value; break;
+    case "scale.y": obj.scale.y = value; break;
+    case "scale.z": obj.scale.z = value; break;
+    case "scale": obj.scale.setScalar(value); break;
+    case "opacity":
+      obj.traverse((child) => {
+        const mesh = child as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const material of materials) {
+          if (!material) continue;
+          material.transparent = true;
+          material.opacity = value;
+        }
+      });
+      break;
+    default:
+      // target.* — camera-only; handled by the camera phase, not by node objects.
+      break;
+  }
 }
 
 interface NodeViewProps {
