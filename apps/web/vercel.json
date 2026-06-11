@@ -3,7 +3,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://YOUR-API-HOST/:path*"
+      "destination": "https://ai-threejs-studioapi-production.up.railway.app/:path*"
     }
   ]
 }
