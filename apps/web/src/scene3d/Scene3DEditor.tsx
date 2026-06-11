@@ -44,6 +44,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   const [generating, setGenerating] = useState(false);
   const [stage, setStage] = useState("");
   const [agentError, setAgentError] = useState<string | null>(null);
+  const [resumePrompt, setResumePrompt] = useState<string | null>(null);
   const usage = useProjectStore((s) => s.usage);
   const loadUsage = useProjectStore((s) => s.loadUsage);
   const logError = useProjectStore((s) => s.logError);
@@ -289,98 +290,112 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     []
   );
 
-  const generate = useCallback(async () => {
-    if (!prompt.trim()) return;
-    // In refine mode the style/mood guidance would fight the "smallest edit"
-    // instruction, so only attach it when building a new scene.
-    const composed = mode === "refine" ? prompt.trim() : composePrompt(prompt, styleId, modifierIds);
-    // Live build-up streams nodes in as the AI writes them — best for NEW scenes.
-    const streaming = liveBuild && mode === "new";
-    setGenerating(true);
-    setAgentError(null);
-    setStage(mode === "refine" ? "Refining the scene" : "Designing the scene");
-    setSaveState("saving");
-    if (scene) recordHistory(scene, true); // standalone undo entry for the generate
-    if (streaming) {
-      // Start from an empty canvas (keep current camera/background) so objects pop in.
-      setScene((current) => ({ metadata: { name: "Building…", version: 1 }, background: current?.background, camera: current?.camera, nodes: [] }));
-    }
-    try {
-      const response = await fetch(`/api/projects/${projectId}/scene3d/agent-run`, {
-        method: "POST",
-        headers: { "content-type": "application/json", ...(await authHeaders()) },
-        body: JSON.stringify({
-          prompt: composed,
-          mode,
-          selectedObjectId: mode === "refine" ? primaryId ?? undefined : undefined,
-          stream: streaming
-        })
-      });
-
-      // Non-OK (e.g. 429 quota, 400 no key) returns a JSON {error}, not a stream.
-      if (!response.ok) {
-        const message = await response
-          .json()
-          .then((body: { error?: string }) => body?.error)
-          .catch(() => null);
-        const detail = message || `Generation failed (${response.status}).`;
-        setAgentError(detail);
-        logError(mode === "refine" ? "Refine failed" : "Generation failed", detail);
-        setSaveState("error");
-        return;
+  // `override` lets "Continue" re-run as a refine with the original prompt.
+  const generate = useCallback(
+    async (override?: { prompt?: string; mode?: "new" | "refine" }) => {
+      const activeMode = override?.mode ?? mode;
+      const rawPrompt = (override?.prompt ?? prompt).trim();
+      if (!rawPrompt) return;
+      // In refine mode the style/mood guidance would fight the "smallest edit"
+      // instruction, so only attach it when building a new scene.
+      const composed = activeMode === "refine" ? rawPrompt : composePrompt(rawPrompt, styleId, modifierIds);
+      // Live build-up streams nodes in as the AI writes them — best for NEW scenes.
+      const streaming = liveBuild && activeMode === "new";
+      setGenerating(true);
+      setAgentError(null);
+      setResumePrompt(null);
+      setStage(activeMode === "refine" ? "Refining the scene" : "Designing the scene");
+      setSaveState("saving");
+      if (scene) recordHistory(scene, true); // standalone undo entry for the generate
+      if (streaming) {
+        // Start from an empty canvas (keep current camera/background) so objects pop in.
+        setScene((current) => ({ metadata: { name: "Building…", version: 1 }, background: current?.background, camera: current?.camera, nodes: [] }));
       }
 
-      // Read the newline-delimited stream: progress | partial-node | result | error.
-      let result: { scene: Scene3D } | null = null;
-      let streamError: string | null = null;
-      if (response.ok && response.body) {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        for (; ;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          let newline: number;
-          while ((newline = buffer.indexOf("\n")) >= 0) {
-            const line = buffer.slice(0, newline).trim();
-            buffer = buffer.slice(newline + 1);
-            if (!line) continue;
-            try {
-              const event = JSON.parse(line) as { type: string; stage?: string; node?: SceneNode; result?: { scene: Scene3D }; message?: string };
-              if (event.type === "progress" && event.stage) setStage(event.stage);
-              else if (event.type === "partial-node" && event.node && streaming) {
-                const node = event.node;
-                setScene((current) => (current ? { ...current, nodes: [...current.nodes, node] } : current));
-              } else if (event.type === "result" && event.result) result = event.result;
-              else if (event.type === "error" && event.message) streamError = event.message;
-            } catch {
-              // ignore partial/non-JSON lines
+      // On failure: if a streaming run already produced objects, keep + save them
+      // and offer to continue, rather than discarding the partial work.
+      const failed = (detail: string) => {
+        logError(activeMode === "refine" ? "Refine failed" : "Generation failed", detail);
+        const partial = streaming ? sceneRef.current : null;
+        if (partial && partial.nodes.length > 0) {
+          setAgentError(`${detail} — kept the ${partial.nodes.length} object(s) made so far; continue to add the rest, or keep editing.`);
+          setResumePrompt(rawPrompt);
+          void save(partial);
+        } else {
+          setAgentError(detail);
+          setSaveState("error");
+        }
+      };
+
+      try {
+        const response = await fetch(`/api/projects/${projectId}/scene3d/agent-run`, {
+          method: "POST",
+          headers: { "content-type": "application/json", ...(await authHeaders()) },
+          body: JSON.stringify({
+            prompt: composed,
+            mode: activeMode,
+            selectedObjectId: activeMode === "refine" ? primaryId ?? undefined : undefined,
+            stream: streaming
+          })
+        });
+
+        // Non-OK (e.g. 429 quota, 400 no key) returns a JSON {error}, not a stream.
+        if (!response.ok) {
+          const message = await response
+            .json()
+            .then((body: { error?: string }) => body?.error)
+            .catch(() => null);
+          failed(message || `Generation failed (${response.status}).`);
+          return;
+        }
+
+        // Read the newline-delimited stream: progress | partial-node | result | error.
+        let result: { scene: Scene3D } | null = null;
+        let streamError: string | null = null;
+        if (response.ok && response.body) {
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          for (; ;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let newline: number;
+            while ((newline = buffer.indexOf("\n")) >= 0) {
+              const line = buffer.slice(0, newline).trim();
+              buffer = buffer.slice(newline + 1);
+              if (!line) continue;
+              try {
+                const event = JSON.parse(line) as { type: string; stage?: string; node?: SceneNode; result?: { scene: Scene3D }; message?: string };
+                if (event.type === "progress" && event.stage) setStage(event.stage);
+                else if (event.type === "partial-node" && event.node && streaming) {
+                  const node = event.node;
+                  setScene((current) => (current ? { ...current, nodes: [...current.nodes, node] } : current));
+                } else if (event.type === "result" && event.result) result = event.result;
+                else if (event.type === "error" && event.message) streamError = event.message;
+              } catch {
+                // ignore partial/non-JSON lines
+              }
             }
           }
         }
-      }
 
-      if (result) {
-        setScene(result.scene); // settle to the validated final scene
-        setSaveState("saved");
-      } else {
-        const detail = streamError || "Generation failed (no scene was returned).";
-        setAgentError(detail);
-        logError(mode === "refine" ? "Refine failed" : "Generation failed", detail);
-        setSaveState("error");
+        if (result) {
+          setScene(result.scene); // settle to the validated final scene
+          setSaveState("saved");
+        } else {
+          failed(streamError || "Generation failed (no scene was returned).");
+        }
+      } catch (e) {
+        failed(e instanceof Error ? e.message : "Generation failed.");
+      } finally {
+        setGenerating(false);
+        setStage("");
+        void loadUsage(); // reflect the consumed (or blocked) generation
       }
-    } catch (e) {
-      const detail = e instanceof Error ? e.message : "Generation failed.";
-      setAgentError(detail);
-      logError(mode === "refine" ? "Refine failed" : "Generation failed", detail);
-      setSaveState("error");
-    } finally {
-      setGenerating(false);
-      setStage("");
-      void loadUsage(); // reflect the consumed (or blocked) generation
-    }
-  }, [projectId, prompt, mode, liveBuild, primaryId, styleId, modifierIds, scene, recordHistory, loadUsage, logError]);
+    },
+    [projectId, prompt, mode, liveBuild, primaryId, styleId, modifierIds, scene, recordHistory, loadUsage, logError, save]
+  );
 
   const deleteSelected = useCallback(() => {
     const prev = sceneRef.current;
@@ -599,7 +614,16 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
                 )}
               </div>
 
-              {agentError ? <div className={styles.agentError}>{agentError}</div> : null}
+              {agentError ? (
+                <div className={styles.agentError}>
+                  <span>{agentError}</span>
+                  {resumePrompt ? (
+                    <button className={styles.button} onClick={() => void generate({ mode: "refine", prompt: resumePrompt })} disabled={generating}>
+                      Continue generating
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
 
               {mode === "new" ? (
                 <ComposerControls

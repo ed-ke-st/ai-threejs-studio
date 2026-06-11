@@ -64,7 +64,7 @@ export const config = {
   anthropicCodeModel: process.env.ANTHROPIC_CODE_MODEL ?? process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6",
   anthropicRepairModel: process.env.ANTHROPIC_REPAIR_MODEL ?? "claude-haiku-4-5",
   anthropicMaxTokens: Number(process.env.ANTHROPIC_MAX_TOKENS ?? 16_000),
-  modelRequestTimeoutMs: Number(process.env.MODEL_REQUEST_TIMEOUT_MS ?? 120_000),
+  modelRequestTimeoutMs: Number(process.env.MODEL_REQUEST_TIMEOUT_MS ?? 180_000),
   maxAgentFixAttempts: Number(process.env.MAX_AGENT_FIX_ATTEMPTS ?? 3),
   auth: {
     enabled: authEnabled,
