@@ -186,11 +186,22 @@ export interface RagChunk {
   };
 }
 
+// Selectable models per provider (also used to validate updates server-side).
+export const MODEL_CHOICES = {
+  claude: ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"],
+  openai: ["gpt-5", "gpt-4.1", "gpt-4.1-mini"]
+} as const;
+
 export interface AppSettings {
   aiProvider: "gemini" | "openai" | "claude" | "auto";
   hasGeminiApiKey: boolean;
   hasOpenAiApiKey: boolean;
   hasAnthropicApiKey: boolean;
+  // Effective models (the user's choice, or the server default when unset).
+  anthropicCodeModel: string;
+  anthropicRepairModel: string;
+  openAiCodeModel: string;
+  openAiRepairModel: string;
 }
 
 export interface AppSettingsUpdate {
@@ -201,4 +212,8 @@ export interface AppSettingsUpdate {
   clearGeminiApiKey?: boolean;
   clearOpenAiApiKey?: boolean;
   clearAnthropicApiKey?: boolean;
+  anthropicCodeModel?: string;
+  anthropicRepairModel?: string;
+  openAiCodeModel?: string;
+  openAiRepairModel?: string;
 }

@@ -5,6 +5,7 @@ import { ProjectMenu } from "./ProjectMenu";
 import { ProjectToolbar } from "./ProjectToolbar";
 import { CloseIcon, SettingsIcon } from "./ui/icons";
 import { authEnabled, supabase } from "./auth/supabaseClient";
+import { MODEL_CHOICES } from "@ai-threejs-studio/shared";
 import styles from "./App.module.css";
 
 export function App() {
@@ -136,6 +137,21 @@ function Toast() {
   return <div className={styles.toast}>{toast}</div>;
 }
 
+function ModelRow({ label, value, options, onChange }: { label: string; value: string; options: readonly string[]; onChange: (value: string) => void }) {
+  return (
+    <label className={styles.settingRow}>
+      <span>{label}</span>
+      <select className={styles.input} value={value} onChange={(e) => onChange(e.target.value)}>
+        {options.map((model) => (
+          <option key={model} value={model}>
+            {model}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function SettingsPanel() {
   const settings = useProjectStore((s) => s.settings);
   const updateSettings = useProjectStore((s) => s.updateSettings);
@@ -166,6 +182,13 @@ function SettingsPanel() {
         </span>
       </label>
 
+      {settings?.hasOpenAiApiKey ? (
+        <>
+          <ModelRow label="OpenAI code model" value={settings.openAiCodeModel} options={MODEL_CHOICES.openai} onChange={(v) => void updateSettings({ openAiCodeModel: v })} />
+          <ModelRow label="OpenAI repair model" value={settings.openAiRepairModel} options={MODEL_CHOICES.openai} onChange={(v) => void updateSettings({ openAiRepairModel: v })} />
+        </>
+      ) : null}
+
       <label className={styles.settingRow}>
         <span>Anthropic API key {settings?.hasAnthropicApiKey ? "✓ set" : ""}</span>
         <span className={styles.settingControl}>
@@ -175,6 +198,13 @@ function SettingsPanel() {
           </button>
         </span>
       </label>
+
+      {settings?.hasAnthropicApiKey ? (
+        <>
+          <ModelRow label="Claude code model" value={settings.anthropicCodeModel} options={MODEL_CHOICES.claude} onChange={(v) => void updateSettings({ anthropicCodeModel: v })} />
+          <ModelRow label="Claude repair model" value={settings.anthropicRepairModel} options={MODEL_CHOICES.claude} onChange={(v) => void updateSettings({ anthropicRepairModel: v })} />
+        </>
+      ) : null}
 
       <label className={styles.settingRow}>
         <span>Gemini API key {settings?.hasGeminiApiKey ? "✓ set" : ""}</span>

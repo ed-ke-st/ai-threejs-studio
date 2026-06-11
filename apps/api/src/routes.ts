@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 import type { FastifyInstance } from "fastify";
 import { getTemplate } from "@ai-threejs-studio/three-templates";
 import type { AppSettingsUpdate, BuildResult, PreviewSession, Project, ProjectShare } from "@ai-threejs-studio/shared";
+import { MODEL_CHOICES } from "@ai-threejs-studio/shared";
 import { z } from "zod";
 import { createScene3DSceneFiles, defaultScene3D } from "@ai-threejs-studio/scene3d/codegen";
 import { SCENE_CONFIG_PATH, validateScene3D } from "@ai-threejs-studio/scene3d";
@@ -122,7 +123,11 @@ const appSettingsSchema = z.object({
   anthropicApiKey: z.string().optional(),
   clearGeminiApiKey: z.boolean().optional(),
   clearOpenAiApiKey: z.boolean().optional(),
-  clearAnthropicApiKey: z.boolean().optional()
+  clearAnthropicApiKey: z.boolean().optional(),
+  anthropicCodeModel: z.enum(MODEL_CHOICES.claude).optional(),
+  anthropicRepairModel: z.enum(MODEL_CHOICES.claude).optional(),
+  openAiCodeModel: z.enum(MODEL_CHOICES.openai).optional(),
+  openAiRepairModel: z.enum(MODEL_CHOICES.openai).optional()
 });
 
 // Short-lived capability token so the preview can load in an <iframe> (which can't
@@ -279,15 +284,15 @@ export function registerRoutes(
     const generator: SceneGenerator = useClaude
       ? new ClaudeSceneGenerator({
           apiKey: anthropicKey,
-          model: config.anthropicCodeModel,
-          repairModel: config.anthropicRepairModel,
+          model: settings.anthropicCodeModel || config.anthropicCodeModel,
+          repairModel: settings.anthropicRepairModel || config.anthropicRepairModel,
           maxTokens: config.anthropicMaxTokens,
           requestTimeoutMs: config.modelRequestTimeoutMs
         })
       : new Scene3DGenerator({
           apiKey: openAiKey,
-          model: config.openAiCodeModel,
-          repairModel: config.openAiRepairModel,
+          model: settings.openAiCodeModel || config.openAiCodeModel,
+          repairModel: settings.openAiRepairModel || config.openAiRepairModel,
           requestTimeoutMs: config.modelRequestTimeoutMs
         });
     if (!generator.enabled) {
@@ -364,9 +369,12 @@ export function registerRoutes(
     return { settings: await settingsRepository.getSettings(request.userId) };
   });
 
-  app.put("/settings", async (request) => {
-    const body = appSettingsSchema.parse(request.body ?? {}) as AppSettingsUpdate;
-    const settings = await settingsRepository.updateSettings(request.userId, body);
+  app.put("/settings", async (request, reply) => {
+    const parsed = appSettingsSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "Invalid settings." });
+    }
+    const settings = await settingsRepository.updateSettings(request.userId, parsed.data as AppSettingsUpdate);
     return { settings };
   });
 
