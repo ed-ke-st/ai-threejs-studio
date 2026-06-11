@@ -36,8 +36,9 @@ ENV API_PORT=4000
 # PREVIEW_MODE defaults to "static" because NODE_ENV=production.
 EXPOSE 4000
 
-# Project workspaces are written under /app/.studio — mount a volume there until
-# bundles move to object storage (see docs/accounts/DEPLOY.md).
-VOLUME ["/app/.studio"]
+# /app/.studio is ephemeral scratch (hydrated build dirs) — projects and bundles
+# live in object storage, so no persistent volume is required. (No Docker VOLUME
+# here: Railway rejects it; attach a Railway Volume in the dashboard if you ever
+# want to persist e.g. the RAG index.)
 
 CMD ["pnpm", "--filter", "@ai-threejs-studio/api", "start"]
