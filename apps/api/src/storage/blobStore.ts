@@ -11,7 +11,9 @@ import { config } from "../config.js";
  */
 export interface BlobStore {
   init(): Promise<void>;
-  put(key: string, body: Buffer | string): Promise<void>;
+  // contentType is stored so signed-URL downloads serve the right type (browsers
+  // strict-MIME-check ES module scripts). Local disk ignores it (served via the API).
+  put(key: string, body: Buffer | string, contentType?: string): Promise<void>;
   get(key: string): Promise<Buffer | null>;
   delete(key: string): Promise<void>;
   list(prefix: string): Promise<string[]>;
@@ -30,9 +32,25 @@ export async function putDir(store: BlobStore, keyPrefix: string, localDir: stri
   await Promise.all(
     files.map(async (absolutePath) => {
       const rel = path.relative(localDir, absolutePath).split(path.sep).join("/");
-      await store.put(`${keyPrefix}/${rel}`, await fs.readFile(absolutePath));
+      await store.put(`${keyPrefix}/${rel}`, await fs.readFile(absolutePath), contentTypeForKey(rel));
     })
   );
+}
+
+/** Content type from a file extension — used so signed-URL downloads serve correctly. */
+export function contentTypeForKey(key: string): string {
+  if (key.endsWith(".html")) return "text/html; charset=utf-8";
+  if (key.endsWith(".js") || key.endsWith(".mjs")) return "text/javascript; charset=utf-8";
+  if (key.endsWith(".css")) return "text/css; charset=utf-8";
+  if (key.endsWith(".json")) return "application/json";
+  if (key.endsWith(".svg")) return "image/svg+xml";
+  if (key.endsWith(".png")) return "image/png";
+  if (key.endsWith(".jpg") || key.endsWith(".jpeg")) return "image/jpeg";
+  if (key.endsWith(".webp")) return "image/webp";
+  if (key.endsWith(".glb")) return "model/gltf-binary";
+  if (key.endsWith(".gltf")) return "model/gltf+json";
+  if (key.endsWith(".wasm")) return "application/wasm";
+  return "application/octet-stream";
 }
 
 async function walkFiles(root: string): Promise<string[]> {
@@ -126,11 +144,11 @@ class SupabaseBlobStore implements BlobStore {
     }
   }
 
-  async put(key: string, body: Buffer | string): Promise<void> {
+  async put(key: string, body: Buffer | string, contentType?: string): Promise<void> {
     const bytes = typeof body === "string" ? Buffer.from(body) : body;
     const { error } = await this.client.storage
       .from(this.bucket)
-      .upload(key, bytes, { upsert: true, contentType: "application/octet-stream" });
+      .upload(key, bytes, { upsert: true, contentType: contentType ?? "application/octet-stream" });
     if (error) throw error;
   }
 

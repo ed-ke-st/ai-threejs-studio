@@ -30,7 +30,8 @@ export class ProjectAssetLibrary {
     const fileName = `${assetId}-${sanitizeFileName(input.name)}`;
     const assets = await this.readIndex(input.projectId);
 
-    await this.blob.put(this.fileKey(input.projectId, fileName), buffer);
+    const contentType = input.type === "model/gltf" ? "model/gltf+json" : "model/gltf-binary";
+    await this.blob.put(this.fileKey(input.projectId, fileName), buffer, contentType);
 
     const asset: Asset = {
       id: assetId,

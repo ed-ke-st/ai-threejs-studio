@@ -222,7 +222,10 @@ export function registerRoutes(
   // The preview is "fresh" when it was built from the project's current version.
   // The marker stores the project.updatedAt the dist was built from (storage-backend
   // agnostic, unlike a local-file mtime). Returns the build only when it failed.
-  async function ensureStaticPreview(id: string, version: string): Promise<{ session?: PreviewSession; build?: BuildResult }> {
+  async function ensureStaticPreview(id: string, rawVersion: string): Promise<{ session?: PreviewSession; build?: BuildResult }> {
+    // The format tag invalidates previews built by older code (e.g. the ones
+    // uploaded before per-file content-types) so they get rebuilt, not reused.
+    const version = `f2:${rawVersion}`;
     const builtVersion = (await blobStore.get(`preview-meta/${id}`))?.toString("utf8");
     if (builtVersion !== version) {
       const { build, distDir, dispose } = await previewRunner.buildAndKeep(id, { base: "./" });
