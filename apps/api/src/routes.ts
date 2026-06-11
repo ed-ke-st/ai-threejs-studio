@@ -183,7 +183,9 @@ export function registerRoutes(
     return {
       projectId: id,
       status: "running",
-      url: `/api/projects/${id}/preview/app/`, // browser-relative; goes through the API
+      // Explicit index.html (not a trailing slash) so the Vercel /api rewrite matches;
+      // relative ./assets/* still resolve against the .../app/ directory.
+      url: `/api/projects/${id}/preview/app/index.html`,
       port: 0, // 0 signals "static" to the client (no live dev server)
       logs: "",
       startedAt: new Date().toISOString()
