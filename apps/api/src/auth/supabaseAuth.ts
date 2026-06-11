@@ -12,7 +12,12 @@ declare module "fastify" {
 // Routes that must work without authentication. Shares are public BY TOKEN.
 function isPublic(url: string): boolean {
   const path = url.split("?")[0];
-  return path === "/health" || path === "/shares" || path.startsWith("/shares/");
+  return (
+    path === "/health" ||
+    path === "/shares" ||
+    path.startsWith("/shares/") ||
+    path.startsWith("/preview/") // token-gated runtime preview (loaded in an iframe)
+  );
 }
 
 /**

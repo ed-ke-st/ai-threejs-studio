@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { nanoid } from "nanoid";
 import type { FastifyInstance } from "fastify";
 import { getTemplate } from "@ai-threejs-studio/three-templates";
@@ -124,6 +125,31 @@ const appSettingsSchema = z.object({
   clearAnthropicApiKey: z.boolean().optional()
 });
 
+// Short-lived capability token so the preview can load in an <iframe> (which can't
+// send an Authorization header). Owner access is checked when the URL is minted;
+// the token then grants read access to that project's preview bundle.
+const previewSecret = config.settingsEncKey ?? "local-preview-secret";
+
+function signPreviewToken(projectId: string): string {
+  const expiry = Date.now() + 3_600_000; // 1 hour
+  const sig = createHmac("sha256", previewSecret).update(`${projectId}.${expiry}`).digest("hex");
+  return `${expiry}.${sig}`;
+}
+
+function verifyPreviewToken(projectId: string, token: string): boolean {
+  const dot = token.lastIndexOf(".");
+  if (dot < 0) return false;
+  const expiry = Number(token.slice(0, dot));
+  const sig = token.slice(dot + 1);
+  if (!Number.isFinite(expiry) || expiry < Date.now()) return false;
+  const expected = createHmac("sha256", previewSecret).update(`${projectId}.${expiry}`).digest("hex");
+  try {
+    return sig.length === expected.length && timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
+
 export function registerRoutes(
   app: FastifyInstance,
   storage: ProjectStorage,
@@ -183,9 +209,10 @@ export function registerRoutes(
     return {
       projectId: id,
       status: "running",
-      // Explicit index.html (not a trailing slash) so the Vercel /api rewrite matches;
-      // relative ./assets/* still resolve against the .../app/ directory.
-      url: `/api/projects/${id}/preview/app/index.html`,
+      // Public, token-gated path so the <iframe> can load it without a bearer header.
+      // Explicit index.html (no trailing slash) so the Vercel /api rewrite matches;
+      // relative ./assets/* resolve against the directory and carry the token.
+      url: `/api/preview/${id}/${signPreviewToken(id)}/index.html`,
       port: 0, // 0 signals "static" to the client (no live dev server)
       logs: "",
       startedAt: new Date().toISOString()
@@ -421,6 +448,17 @@ export function registerRoutes(
     const { shareId } = request.params as { shareId: string };
     const wildcard = (request.params as Record<string, string>)["*"] || "index.html";
     return serveBundleFile(reply, `shares/${shareId}`, wildcard === "" ? "index.html" : wildcard);
+  });
+
+  // Public, token-gated runtime preview (loadable in an iframe). The token is minted
+  // by the owner-checked /preview/start; it grants read access to the preview bundle.
+  app.get("/preview/:id/:token/*", async (request, reply) => {
+    const { id, token } = request.params as { id: string; token: string };
+    if (!verifyPreviewToken(id, token)) {
+      return reply.code(403).send({ error: "Invalid or expired preview link." });
+    }
+    const wildcard = (request.params as Record<string, string>)["*"] || "index.html";
+    return serveBundleFile(reply, `previews/${id}`, wildcard === "" ? "index.html" : wildcard);
   });
 
   app.post("/projects", async (request, reply) => {
