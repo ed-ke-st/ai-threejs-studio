@@ -5,7 +5,7 @@ import { ProjectMenu } from "./ProjectMenu";
 import { ProjectToolbar } from "./ProjectToolbar";
 import { CloseIcon, SettingsIcon } from "./ui/icons";
 import { authEnabled, supabase } from "./auth/supabaseClient";
-import { MODEL_CHOICES } from "@ai-threejs-studio/shared";
+import { MODEL_CHOICES, type AppSettingsUpdate } from "@ai-threejs-studio/shared";
 import styles from "./App.module.css";
 
 export function App() {
@@ -158,13 +158,33 @@ function SettingsPanel() {
   const [openAiKey, setOpenAiKey] = useState("");
   const [geminiKey, setGeminiKey] = useState("");
   const [anthropicKey, setAnthropicKey] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  // Wrap updates so a failure surfaces its detail instead of failing silently.
+  const save = async (patch: AppSettingsUpdate) => {
+    setError(null);
+    try {
+      await updateSettings(patch);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   return (
     <div className={styles.settings}>
       <h2 className={styles.settingsTitle}>Settings</h2>
+      {error ? (
+        <details className={styles.settingsError} open>
+          <summary>Couldn’t save settings — show details</summary>
+          <pre>{error}</pre>
+          <span className={styles.settingsErrorHint}>
+            This is often transient (e.g. the server restarting after a deploy). Try again in a moment.
+          </span>
+        </details>
+      ) : null}
       <label className={styles.settingRow}>
         <span>AI provider</span>
-        <select className={styles.input} value={settings?.aiProvider ?? "auto"} onChange={(e) => void updateSettings({ aiProvider: e.target.value as "openai" | "gemini" | "claude" | "auto" })}>
+        <select className={styles.input} value={settings?.aiProvider ?? "auto"} onChange={(e) => void save({ aiProvider: e.target.value as "openai" | "gemini" | "claude" | "auto" })}>
           <option value="auto">Auto</option>
           <option value="openai">OpenAI</option>
           <option value="claude">Claude</option>
@@ -176,7 +196,7 @@ function SettingsPanel() {
         <span>OpenAI API key {settings?.hasOpenAiApiKey ? "✓ set" : ""}</span>
         <span className={styles.settingControl}>
           <input className={styles.input} type="password" placeholder="sk-…" value={openAiKey} onChange={(e) => setOpenAiKey(e.target.value)} />
-          <button className={styles.ghost} disabled={!openAiKey} onClick={() => { void updateSettings({ openAiApiKey: openAiKey }); setOpenAiKey(""); }}>
+          <button className={styles.ghost} disabled={!openAiKey} onClick={() => { void save({ openAiApiKey: openAiKey }); setOpenAiKey(""); }}>
             Save
           </button>
         </span>
@@ -184,8 +204,8 @@ function SettingsPanel() {
 
       {settings?.hasOpenAiApiKey ? (
         <>
-          <ModelRow label="OpenAI code model" value={settings.openAiCodeModel} options={MODEL_CHOICES.openai} onChange={(v) => void updateSettings({ openAiCodeModel: v })} />
-          <ModelRow label="OpenAI repair model" value={settings.openAiRepairModel} options={MODEL_CHOICES.openai} onChange={(v) => void updateSettings({ openAiRepairModel: v })} />
+          <ModelRow label="OpenAI code model" value={settings.openAiCodeModel} options={MODEL_CHOICES.openai} onChange={(v) => void save({ openAiCodeModel: v })} />
+          <ModelRow label="OpenAI repair model" value={settings.openAiRepairModel} options={MODEL_CHOICES.openai} onChange={(v) => void save({ openAiRepairModel: v })} />
         </>
       ) : null}
 
@@ -193,7 +213,7 @@ function SettingsPanel() {
         <span>Anthropic API key {settings?.hasAnthropicApiKey ? "✓ set" : ""}</span>
         <span className={styles.settingControl}>
           <input className={styles.input} type="password" placeholder="sk-ant-…" value={anthropicKey} onChange={(e) => setAnthropicKey(e.target.value)} />
-          <button className={styles.ghost} disabled={!anthropicKey} onClick={() => { void updateSettings({ anthropicApiKey: anthropicKey }); setAnthropicKey(""); }}>
+          <button className={styles.ghost} disabled={!anthropicKey} onClick={() => { void save({ anthropicApiKey: anthropicKey }); setAnthropicKey(""); }}>
             Save
           </button>
         </span>
@@ -201,8 +221,8 @@ function SettingsPanel() {
 
       {settings?.hasAnthropicApiKey ? (
         <>
-          <ModelRow label="Claude code model" value={settings.anthropicCodeModel} options={MODEL_CHOICES.claude} onChange={(v) => void updateSettings({ anthropicCodeModel: v })} />
-          <ModelRow label="Claude repair model" value={settings.anthropicRepairModel} options={MODEL_CHOICES.claude} onChange={(v) => void updateSettings({ anthropicRepairModel: v })} />
+          <ModelRow label="Claude code model" value={settings.anthropicCodeModel} options={MODEL_CHOICES.claude} onChange={(v) => void save({ anthropicCodeModel: v })} />
+          <ModelRow label="Claude repair model" value={settings.anthropicRepairModel} options={MODEL_CHOICES.claude} onChange={(v) => void save({ anthropicRepairModel: v })} />
         </>
       ) : null}
 
@@ -210,7 +230,7 @@ function SettingsPanel() {
         <span>Gemini API key {settings?.hasGeminiApiKey ? "✓ set" : ""}</span>
         <span className={styles.settingControl}>
           <input className={styles.input} type="password" placeholder="AIza…" value={geminiKey} onChange={(e) => setGeminiKey(e.target.value)} />
-          <button className={styles.ghost} disabled={!geminiKey} onClick={() => { void updateSettings({ geminiApiKey: geminiKey }); setGeminiKey(""); }}>
+          <button className={styles.ghost} disabled={!geminiKey} onClick={() => { void save({ geminiApiKey: geminiKey }); setGeminiKey(""); }}>
             Save
           </button>
         </span>
