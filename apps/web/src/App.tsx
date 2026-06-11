@@ -138,11 +138,14 @@ function Toast() {
 }
 
 function ModelRow({ label, value, options, onChange }: { label: string; value: string; options: readonly string[]; onChange: (value: string) => void }) {
+  // Always include the current value so the selected model shows even if it's not
+  // in the fetched list (e.g. a server default not returned by the provider).
+  const opts = value && !options.includes(value) ? [value, ...options] : options;
   return (
     <label className={styles.settingRow}>
       <span>{label}</span>
       <select className={styles.input} value={value} onChange={(e) => onChange(e.target.value)}>
-        {options.map((model) => (
+        {opts.map((model) => (
           <option key={model} value={model}>
             {model}
           </option>
@@ -156,10 +159,23 @@ function SettingsPanel() {
   const settings = useProjectStore((s) => s.settings);
   const updateSettings = useProjectStore((s) => s.updateSettings);
   const logError = useProjectStore((s) => s.logError);
+  const fetchModels = useProjectStore((s) => s.fetchModels);
   const [openAiKey, setOpenAiKey] = useState("");
   const [geminiKey, setGeminiKey] = useState("");
   const [anthropicKey, setAnthropicKey] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [openAiModels, setOpenAiModels] = useState<string[]>([]);
+  const [anthropicModels, setAnthropicModels] = useState<string[]>([]);
+
+  // Pull the models each key actually has access to (falls back to MODEL_CHOICES).
+  const hasOpenAi = settings?.hasOpenAiApiKey;
+  const hasAnthropic = settings?.hasAnthropicApiKey;
+  useEffect(() => {
+    if (hasOpenAi) void fetchModels("openai").then(setOpenAiModels);
+  }, [hasOpenAi, fetchModels]);
+  useEffect(() => {
+    if (hasAnthropic) void fetchModels("anthropic").then(setAnthropicModels);
+  }, [hasAnthropic, fetchModels]);
 
   // Wrap updates so a failure surfaces its detail instead of failing silently.
   const save = async (patch: AppSettingsUpdate) => {
@@ -207,8 +223,8 @@ function SettingsPanel() {
 
       {settings?.hasOpenAiApiKey ? (
         <>
-          <ModelRow label="OpenAI code model" value={settings.openAiCodeModel} options={MODEL_CHOICES.openai} onChange={(v) => void save({ openAiCodeModel: v })} />
-          <ModelRow label="OpenAI repair model" value={settings.openAiRepairModel} options={MODEL_CHOICES.openai} onChange={(v) => void save({ openAiRepairModel: v })} />
+          <ModelRow label="OpenAI code model" value={settings.openAiCodeModel} options={openAiModels.length ? openAiModels : MODEL_CHOICES.openai} onChange={(v) => void save({ openAiCodeModel: v })} />
+          <ModelRow label="OpenAI repair model" value={settings.openAiRepairModel} options={openAiModels.length ? openAiModels : MODEL_CHOICES.openai} onChange={(v) => void save({ openAiRepairModel: v })} />
         </>
       ) : null}
 
@@ -224,8 +240,8 @@ function SettingsPanel() {
 
       {settings?.hasAnthropicApiKey ? (
         <>
-          <ModelRow label="Claude code model" value={settings.anthropicCodeModel} options={MODEL_CHOICES.claude} onChange={(v) => void save({ anthropicCodeModel: v })} />
-          <ModelRow label="Claude repair model" value={settings.anthropicRepairModel} options={MODEL_CHOICES.claude} onChange={(v) => void save({ anthropicRepairModel: v })} />
+          <ModelRow label="Claude code model" value={settings.anthropicCodeModel} options={anthropicModels.length ? anthropicModels : MODEL_CHOICES.claude} onChange={(v) => void save({ anthropicCodeModel: v })} />
+          <ModelRow label="Claude repair model" value={settings.anthropicRepairModel} options={anthropicModels.length ? anthropicModels : MODEL_CHOICES.claude} onChange={(v) => void save({ anthropicRepairModel: v })} />
         </>
       ) : null}
 

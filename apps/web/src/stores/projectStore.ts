@@ -66,6 +66,7 @@ interface ProjectState {
   exportBuildArchive: () => Promise<void>;
   loadSettings: () => Promise<void>;
   updateSettings: (patch: AppSettingsUpdate) => Promise<void>;
+  fetchModels: (provider: "openai" | "anthropic") => Promise<string[]>;
   usage: UsageSnapshot | null;
   loadUsage: () => Promise<void>;
   logs: LogEntry[];
@@ -252,6 +253,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       body: JSON.stringify(patch)
     });
     set({ settings: data.settings, statusMessage: "Settings saved" });
+  },
+
+  async fetchModels(provider) {
+    try {
+      const data = await api<{ models: string[] }>(`/settings/models/${provider}`);
+      return data.models;
+    } catch {
+      return [];
+    }
   },
 
   async loadUsage() {

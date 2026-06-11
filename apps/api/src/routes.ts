@@ -5,7 +5,7 @@ import { nanoid } from "nanoid";
 import type { FastifyInstance } from "fastify";
 import { getTemplate } from "@ai-threejs-studio/three-templates";
 import type { AppSettingsUpdate, BuildResult, PreviewSession, Project, ProjectShare } from "@ai-threejs-studio/shared";
-import { MODEL_CHOICES } from "@ai-threejs-studio/shared";
+import { listModels } from "./modelCatalog.js";
 import { z } from "zod";
 import { createScene3DSceneFiles, defaultScene3D } from "@ai-threejs-studio/scene3d/codegen";
 import { SCENE_CONFIG_PATH, validateScene3D } from "@ai-threejs-studio/scene3d";
@@ -124,10 +124,12 @@ const appSettingsSchema = z.object({
   clearGeminiApiKey: z.boolean().optional(),
   clearOpenAiApiKey: z.boolean().optional(),
   clearAnthropicApiKey: z.boolean().optional(),
-  anthropicCodeModel: z.enum(MODEL_CHOICES.claude).optional(),
-  anthropicRepairModel: z.enum(MODEL_CHOICES.claude).optional(),
-  openAiCodeModel: z.enum(MODEL_CHOICES.openai).optional(),
-  openAiRepairModel: z.enum(MODEL_CHOICES.openai).optional()
+  // Models are validated by the provider at use time (the UI offers the key's
+  // actual model list); accept any reasonable id here.
+  anthropicCodeModel: z.string().max(100).optional(),
+  anthropicRepairModel: z.string().max(100).optional(),
+  openAiCodeModel: z.string().max(100).optional(),
+  openAiRepairModel: z.string().max(100).optional()
 });
 
 // Short-lived capability token so the preview can load in an <iframe> (which can't
@@ -376,6 +378,22 @@ export function registerRoutes(
     }
     const settings = await settingsRepository.updateSettings(request.userId, parsed.data as AppSettingsUpdate);
     return { settings };
+  });
+
+  // Models the user's key for a provider actually has access to (for the UI).
+  app.get("/settings/models/:provider", async (request, reply) => {
+    const { provider } = request.params as { provider: string };
+    if (provider !== "openai" && provider !== "anthropic") {
+      return reply.code(400).send({ error: "Unknown provider." });
+    }
+    const settings = await settingsRepository.getStoredSettings(request.userId);
+    const key = provider === "openai" ? settings.openAiApiKey : settings.anthropicApiKey;
+    if (!key) return { models: [] };
+    try {
+      return { models: await listModels(provider, key) };
+    } catch (error) {
+      return reply.code(502).send({ error: error instanceof Error ? error.message : "Failed to list models." });
+    }
   });
 
   // Today's per-user usage vs limits (null limit = unlimited / single-tenant).
