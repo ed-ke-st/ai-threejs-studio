@@ -36,9 +36,12 @@ interface SceneViewProps {
   /** Render the scene's active camera as the default camera (runtime/share/export, and
    *  the editor's "look through" mode). When false the consumer's Canvas camera is used. */
   renderActiveCamera?: boolean;
+  /** Pause the animation driver (editor only) — e.g. while the transform gizmo is
+   *  dragging, so the user can move a node whose channel is otherwise animation-driven. */
+  suppressAnimation?: boolean;
 }
 
-export function SceneView({ scene, selectedId, selectedIds, onSelect, animationTime, renderActiveCamera }: SceneViewProps) {
+export function SceneView({ scene, selectedId, selectedIds, onSelect, animationTime, renderActiveCamera, suppressAnimation }: SceneViewProps) {
   const ids = selectedIds ?? (selectedId ? [selectedId] : []);
   return (
     <>
@@ -48,7 +51,7 @@ export function SceneView({ scene, selectedId, selectedIds, onSelect, animationT
       {scene.environment?.preset ? (
         <Environment preset={scene.environment.preset as never} environmentIntensity={scene.environment.intensity ?? 1} />
       ) : null}
-      {scene.animation && scene.animation.tracks.length > 0 ? (
+      {scene.animation && scene.animation.tracks.length > 0 && !suppressAnimation ? (
         <AnimationDriver animation={scene.animation} time={animationTime} />
       ) : null}
       {scene.nodes.map((node) => (

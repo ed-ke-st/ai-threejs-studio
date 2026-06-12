@@ -61,6 +61,9 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [playhead, setPlayhead] = useState(0);
   const [playing, setPlaying] = useState(false);
+  // True while the transform gizmo is being dragged — suspends the animation driver
+  // so the node follows the gizmo instead of snapping back to its keyframed pose.
+  const [gizmoDragging, setGizmoDragging] = useState(false);
   // Refs so the (stable) gizmo-commit handler can read live transport state for auto-key.
   const playheadRef = useRef(0);
   const playingRef = useRef(false);
@@ -972,7 +975,8 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
               selectedIds={selectedIds}
               onSelect={(id) => selectNode(id, { additive: additiveRef.current }, visibleNodes)}
               renderActiveCamera={lookThrough}
-              animationTime={previewActive ? playhead : undefined}
+              animationTime={playhead}
+              suppressAnimation={!previewActive || gizmoDragging}
             />
             <RootCapture target={sceneRootRef} />
             <ContactShadows position={[0, 0.01, 0]} opacity={0.5} scale={20} blur={2.4} far={8} />
@@ -984,6 +988,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
               snap={gizmoSnap}
               sceneObj={scene}
               onCommit={commitGizmo}
+              onDraggingChange={setGizmoDragging}
             />
           </Canvas>
 
@@ -1116,7 +1121,8 @@ function Gizmo({
   space,
   snap,
   sceneObj,
-  onCommit
+  onCommit,
+  onDraggingChange
 }: {
   selectedId: string | null;
   mode: GizmoMode;
@@ -1124,6 +1130,7 @@ function Gizmo({
   snap: boolean;
   sceneObj: unknown;
   onCommit: (position: [number, number, number], rotation: [number, number, number], scale: [number, number, number]) => void;
+  onDraggingChange?: (dragging: boolean) => void;
 }) {
   const scene = useThree((state) => state.scene);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1140,6 +1147,10 @@ function Gizmo({
     const node = controls.current;
     if (!node) return;
     const onDragging = (event: { value: boolean }) => {
+      // Tell the editor a drag started/ended so it can suspend the animation
+      // driver mid-drag (otherwise the driver overrides the transform each frame
+      // and the object can't be moved while previewing an animated channel).
+      onDraggingChange?.(event.value);
       if (event.value) return;
       const obj = node.object as Object3D | undefined;
       if (!obj) return;
@@ -1151,7 +1162,7 @@ function Gizmo({
     };
     node.addEventListener("dragging-changed", onDragging);
     return () => node.removeEventListener("dragging-changed", onDragging);
-  }, [onCommit, target]);
+  }, [onCommit, onDraggingChange, target]);
 
   if (!target) return null;
   return (
