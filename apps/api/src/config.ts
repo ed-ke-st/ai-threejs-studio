@@ -64,7 +64,13 @@ export const config = {
   anthropicCodeModel: process.env.ANTHROPIC_CODE_MODEL ?? process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6",
   anthropicRepairModel: process.env.ANTHROPIC_REPAIR_MODEL ?? "claude-haiku-4-5",
   anthropicMaxTokens: Number(process.env.ANTHROPIC_MAX_TOKENS ?? 16_000),
-  modelRequestTimeoutMs: Number(process.env.MODEL_REQUEST_TIMEOUT_MS ?? 180_000),
+  // Model-call watchdog. Every model call streams, so the meaningful failure mode
+  // is the stream going quiet, not total duration: `stall` aborts when no bytes
+  // arrive for that long; `total` is a generous absolute backstop so a slow but
+  // healthy model (Opus-class writing a large scene) is never cut off mid-write.
+  // MODEL_REQUEST_TIMEOUT_MS is honoured as a legacy alias for the total budget.
+  modelStallTimeoutMs: Number(process.env.MODEL_STALL_TIMEOUT_MS ?? 60_000),
+  modelTotalTimeoutMs: Number(process.env.MODEL_TOTAL_TIMEOUT_MS ?? process.env.MODEL_REQUEST_TIMEOUT_MS ?? 600_000),
   maxAgentFixAttempts: Number(process.env.MAX_AGENT_FIX_ATTEMPTS ?? 3),
   auth: {
     enabled: authEnabled,

@@ -19,6 +19,9 @@ export interface QuotaStatus {
 export interface UsageService {
   /** Atomically count one use of `kind` today if under the limit; report status. */
   consume(userId: string, kind: QuotaKind): Promise<QuotaStatus>;
+  /** Return one previously consumed use (the run failed or was cancelled, so it
+   *  shouldn't count against the daily quota). */
+  refund(userId: string, kind: QuotaKind): Promise<void>;
   /** Read-only snapshot of today's usage for the UI. */
   status(userId: string): Promise<Record<QuotaKind, QuotaStatus>>;
 }
@@ -30,6 +33,7 @@ export class NoopUsageService implements UsageService {
   async consume(): Promise<QuotaStatus> {
     return UNLIMITED;
   }
+  async refund(): Promise<void> {}
   async status(): Promise<Record<QuotaKind, QuotaStatus>> {
     return { agentRun: UNLIMITED, build: UNLIMITED };
   }
@@ -56,6 +60,16 @@ export class PostgresUsageService implements UsageService {
       return { allowed: true, used: Number((rows[0] as unknown as { used: number }).used), limit };
     }
     return { allowed: false, used: limit, limit };
+  }
+
+  async refund(userId: string, kind: QuotaKind): Promise<void> {
+    const limit = LIMIT[kind];
+    if (!Number.isFinite(limit) || limit <= 0) return;
+    const col = COLUMN[kind];
+    await this.sql.unsafe(
+      `update usage_quota set ${col} = greatest(${col} - 1, 0) where user_id = $1 and day = current_date`,
+      [userId]
+    );
   }
 
   async status(userId: string): Promise<Record<QuotaKind, QuotaStatus>> {

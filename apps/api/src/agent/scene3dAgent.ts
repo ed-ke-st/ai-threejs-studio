@@ -38,6 +38,9 @@ export class Scene3DAgent {
     retrievedContext?: RagChunk[];
     mode?: "new" | "refine";
     selectedObjectId?: string;
+    /** Caller cancellation (e.g. the HTTP client disconnected) — aborts the in-flight
+     *  model call and stops the loop before the next expensive step. */
+    signal?: AbortSignal;
     onProgress?: (stage: string) => void;
     onNode?: (node: unknown) => void;
   }): Promise<Scene3DAgentResult> {
@@ -56,13 +59,19 @@ export class Scene3DAgent {
     progress(input.mode === "refine" ? "Refining the scene" : "Designing the scene");
     // Editor-uploaded image textures are stored inline as data URIs. They'd be
     // huge (and useless) in the model prompt, so strip them to a placeholder on
-    // the way in and restore them by node id on the way out.
+    // the way in and restore them by node id on the way out. Scene JSON travels
+    // minified — indentation is pure input-token waste.
+    const promptScene = JSON.stringify(stripTextureData(currentScene));
     const generateInput = {
       prompt: input.prompt,
-      currentScene: JSON.stringify(stripTextureData(currentScene), null, 2),
+      currentScene: promptScene,
       retrievedContext,
       mode: input.mode,
-      selectedContext
+      selectedContext,
+      signal: input.signal
+    };
+    const throwIfCancelled = () => {
+      if (input.signal?.aborted) throw new Error("Generation cancelled.");
     };
     // Hovering/floating is only valid when the prompt asks for it.
     const allowFloating = /\b(float|floating|hover|hovering|levitat|suspend|mid-?air|flying|orbit)\b/i.test(input.prompt);
@@ -106,6 +115,7 @@ export class Scene3DAgent {
 
     // 2-4. Write, build, visual-validate, repair.
     let attempts = 0;
+    throwIfCancelled();
     progress("Building the scene");
     let build = await this.writeAndBuild(input.projectId, scene);
     progress("Checking it renders");
@@ -113,22 +123,45 @@ export class Scene3DAgent {
     log.push(stepLine(0, build, visual, issues, lint));
 
     while (attempts < this.options.maxRepairAttempts && !isHealthy(build, visual, lint)) {
+      throwIfCancelled();
       attempts += 1;
+      // When the scene already compiled and rendered, the only failures left are
+      // spatial lint — and a lint repair just moves/scales nodes. The scene is
+      // pure data (the generated source set is scene-independent), so the result
+      // can be re-linted without paying for a rebuild + headless screenshot.
+      const lintOnlyFailure = build.ok && visual !== null && visual.ok;
       progress(`Fixing issues (attempt ${attempts})`);
       const diagnostics = collectDiagnostics(build, visual, issues, lint);
-      const repaired = await this.options.generator.repair({
-        prompt: input.prompt,
-        currentScene: JSON.stringify(stripTextureData(currentScene), null, 2),
-        brokenScene: JSON.stringify(stripTextureData(scene), null, 2),
-        diagnostics,
-        attempt: attempts,
-        retrievedContext
-      });
-      const result = validateScene3D(parseJson(repaired));
+      const repaired = parseJson(
+        await this.options.generator.repair({
+          prompt: input.prompt,
+          currentScene: promptScene,
+          brokenScene: JSON.stringify(stripTextureData(scene)),
+          diagnostics,
+          attempt: attempts,
+          retrievedContext,
+          signal: input.signal
+        })
+      );
+      // Patch-based repair: apply ops to the broken scene so untouched nodes
+      // survive verbatim; a full Scene3D document still works as a fallback.
+      const patched = isRecord(repaired) && Array.isArray(repaired.ops) ? applyScenePatch(scene, repaired) : null;
+      const result = validateScene3D(patched ?? repaired);
+      if (patched) log.push(`Repair ${attempts}: applied patch (${patchOpCount(repaired)} op(s)).`);
       scene = restoreTextureData(result.scene, currentScene);
       scene = this.autoFix(scene, isNew, allowFloating, log);
       issues = result.issues;
       lint = lintScene(scene, { allowFloating });
+      throwIfCancelled();
+      // Fast path requires the repair to have arrived as a clean patch: a patch is
+      // anchored to the scene that already rendered, so skipping the screenshot is
+      // safe. A full-document fallback gets the full build + visual check.
+      if (lintOnlyFailure && patched) {
+        progress("Re-checking layout");
+        await this.writeScene(input.projectId, scene);
+        log.push(`${stepLine(attempts, build, visual, issues, lint)} (lint-only repair: skipped rebuild)`);
+        continue;
+      }
       progress("Building the scene");
       build = await this.writeAndBuild(input.projectId, scene);
       progress("Checking it renders");
@@ -172,10 +205,14 @@ export class Scene3DAgent {
 
   // Writes the full Scene3D-backed source set (shared interpreter + config) so the
   // project always renders through the canonical renderer.
-  private async writeAndBuild(projectId: string, scene: Scene3D): Promise<BuildResult> {
+  private async writeScene(projectId: string, scene: Scene3D): Promise<void> {
     for (const file of createScene3DSceneFiles(scene)) {
       await this.options.storage.writeProjectFile(projectId, file.path, file.content);
     }
+  }
+
+  private async writeAndBuild(projectId: string, scene: Scene3D): Promise<BuildResult> {
+    await this.writeScene(projectId, scene);
     return this.options.previewRunner.build(projectId);
   }
 

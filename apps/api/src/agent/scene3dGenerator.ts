@@ -11,7 +11,10 @@ interface Scene3DGeneratorOptions {
   model: string;
   /** Optional cheaper/faster model for the mechanical repair loop. Defaults to `model`. */
   repairModel?: string;
-  requestTimeoutMs: number;
+  /** Abort when the model stream goes quiet for this long (the failure signal). */
+  stallTimeoutMs: number;
+  /** Generous absolute backstop so a slow-but-healthy model is never cut off. */
+  totalTimeoutMs: number;
 }
 
 export interface GenerateScene3DInput {
@@ -23,6 +26,8 @@ export interface GenerateScene3DInput {
   /** In refine mode, a description of the node the user has selected so that
    * "this"/"it"/"the selected object" resolves to it. */
   selectedContext?: string;
+  /** Caller cancellation (e.g. the HTTP client disconnected) — aborts the model call. */
+  signal?: AbortSignal;
 }
 
 export interface RepairScene3DInput extends GenerateScene3DInput {
@@ -39,6 +44,62 @@ export interface SceneGenerator {
   /** Refine via a small JSON patch (ops by node id) instead of a whole-scene regen. */
   refineDiff(input: GenerateScene3DInput): Promise<string | null>;
   repair(input: RepairScene3DInput): Promise<string | null>;
+}
+
+// Watchdog for streamed model calls. Every model call streams (even when the
+// caller doesn't consume partial output), so the failure signal is the stream
+// going quiet — not total duration. Aborts on: stall (no bump() for stallMs),
+// total budget expiry, or the caller's own signal. `describeError` rewrites the
+// resulting AbortError into an actionable message.
+export interface StreamWatchdog {
+  signal: AbortSignal;
+  /** Reset the stall window — call on every streamed delta. */
+  bump(): void;
+  dispose(): void;
+  describeError(error: unknown): Error;
+}
+
+export function createStreamWatchdog(options: { stallMs: number; totalMs: number; signal?: AbortSignal }): StreamWatchdog {
+  const controller = new AbortController();
+  let reason: "stall" | "total" | "cancelled" | null = null;
+  const abort = (why: typeof reason) => {
+    if (controller.signal.aborted) return;
+    reason = why;
+    controller.abort();
+  };
+
+  let stallTimer = setTimeout(() => abort("stall"), options.stallMs);
+  const totalTimer = setTimeout(() => abort("total"), options.totalMs);
+  const onCallerAbort = () => abort("cancelled");
+  options.signal?.addEventListener("abort", onCallerAbort, { once: true });
+  if (options.signal?.aborted) abort("cancelled");
+
+  return {
+    signal: controller.signal,
+    bump() {
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => abort("stall"), options.stallMs);
+    },
+    dispose() {
+      clearTimeout(stallTimer);
+      clearTimeout(totalTimer);
+      options.signal?.removeEventListener("abort", onCallerAbort);
+    },
+    describeError(error: unknown): Error {
+      if (reason === "stall") {
+        return new Error(`The model stream stalled (no output for ${Math.round(options.stallMs / 1000)}s). Please try again.`);
+      }
+      if (reason === "total") {
+        return new Error(
+          `The model did not finish within ${Math.round(options.totalMs / 60_000)} minutes. Try a faster model (e.g. Sonnet) or simplify the prompt.`
+        );
+      }
+      if (reason === "cancelled") {
+        return new Error("Generation cancelled.");
+      }
+      return error instanceof Error ? error : new Error(String(error));
+    }
+  };
 }
 
 // Shared user-message parts (provider-agnostic). `includeFewShot` is true for
@@ -80,70 +141,26 @@ export class Scene3DGenerator implements SceneGenerator {
 
   async generate(input: GenerateScene3DInput): Promise<string | null> {
     const { instructions, parts } = this.buildGeneration(input);
-    return this.call(this.options.model, instructions, parts);
+    return this.streamCall({ model: this.options.model, instructions, parts, signal: input.signal });
   }
 
   // Streaming variant: emits each top-level scene node via `onNode` the moment it
   // finishes being written, so the editor can build the scene up live. Returns the
   // full output text for the agent to validate as usual.
   async generateStreaming(input: GenerateScene3DInput, onNode: (node: unknown) => void): Promise<string | null> {
-    if (!this.options.apiKey) {
-      return null;
-    }
     const { instructions, parts } = this.buildGeneration(input);
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      signal: AbortSignal.timeout(this.options.requestTimeoutMs),
-      headers: { authorization: `Bearer ${this.options.apiKey}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        model: this.options.model,
-        instructions,
-        input: [{ role: "user", content: [{ type: "input_text", text: parts.filter(Boolean).join("\n\n") }] }],
-        stream: true
-      })
-    });
-
-    if (!response.ok || !response.body) {
-      throw new Error(`OpenAI Scene3D streaming failed with status ${response.status}`);
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
     const nodeParser = new NodeStreamParser();
-    let sseBuffer = "";
-    let deltaText = "";
-    let finalText: string | null = null;
-
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      sseBuffer += decoder.decode(value, { stream: true });
-      let newline: number;
-      while ((newline = sseBuffer.indexOf("\n")) >= 0) {
-        const line = sseBuffer.slice(0, newline).trim();
-        sseBuffer = sseBuffer.slice(newline + 1);
-        if (!line.startsWith("data:")) continue;
-        const payload = line.slice(5).trim();
-        if (!payload || payload === "[DONE]") continue;
-        let event: { type?: string; delta?: string; response?: OpenAiResponse };
-        try {
-          event = JSON.parse(payload);
-        } catch {
-          continue;
-        }
-        if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
-          deltaText += event.delta;
-          for (const node of nodeParser.push(event.delta)) {
-            onNode(node);
-          }
-        } else if (event.type === "response.completed" && event.response) {
-          // Authoritative full text (covers any unexpected delta event shape).
-          finalText = extractOutputText(event.response);
+    return this.streamCall({
+      model: this.options.model,
+      instructions,
+      parts,
+      signal: input.signal,
+      onDelta: (delta) => {
+        for (const node of nodeParser.push(delta)) {
+          onNode(node);
         }
       }
-    }
-
-    return (finalText ?? deltaText)?.trim() || null;
+    });
   }
 
   private buildGeneration(input: GenerateScene3DInput): { instructions: string; parts: Array<string | null | undefined> } {
@@ -155,38 +172,99 @@ export class Scene3DGenerator implements SceneGenerator {
   }
 
   async refineDiff(input: GenerateScene3DInput): Promise<string | null> {
-    return this.call(this.options.model, `${SCENE3D_REFINE_DIFF_INSTRUCTION}\n\nReturn only the JSON patch object, no markdown.`, buildGenerationParts(input));
+    return this.streamCall({
+      model: this.options.model,
+      instructions: `${SCENE3D_REFINE_DIFF_INSTRUCTION}\n\nReturn only the JSON patch object, no markdown.`,
+      parts: buildGenerationParts(input),
+      signal: input.signal
+    });
   }
 
   async repair(input: RepairScene3DInput): Promise<string | null> {
-    return this.call(this.options.repairModel ?? this.options.model, `${SCENE3D_REPAIR_INSTRUCTION} Return only JSON, no markdown.`, buildRepairParts(input));
+    return this.streamCall({
+      model: this.options.repairModel ?? this.options.model,
+      instructions: `${SCENE3D_REPAIR_INSTRUCTION} Return only JSON, no markdown.`,
+      parts: buildRepairParts(input),
+      signal: input.signal
+    });
   }
 
-  private async call(model: string, instructions: string, parts: Array<string | null | undefined>): Promise<string | null> {
+  // The single model-call path: ALWAYS streams (a long non-streaming request is
+  // the thing that times out on slow/advanced models), guarded by the stall/total
+  // watchdog instead of a fixed wall-clock abort.
+  private async streamCall(call: {
+    model: string;
+    instructions: string;
+    parts: Array<string | null | undefined>;
+    signal?: AbortSignal;
+    onDelta?: (delta: string) => void;
+  }): Promise<string | null> {
     if (!this.options.apiKey) {
       return null;
     }
-
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      signal: AbortSignal.timeout(this.options.requestTimeoutMs),
-      headers: {
-        authorization: `Bearer ${this.options.apiKey}`,
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({
-        model,
-        instructions,
-        input: [{ role: "user", content: [{ type: "input_text", text: parts.filter(Boolean).join("\n\n") }] }]
-      })
+    const watchdog = createStreamWatchdog({
+      stallMs: this.options.stallTimeoutMs,
+      totalMs: this.options.totalTimeoutMs,
+      signal: call.signal
     });
 
-    if (!response.ok) {
-      throw new Error(`OpenAI Scene3D generation failed with status ${response.status}`);
-    }
+    try {
+      const response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        signal: watchdog.signal,
+        headers: { authorization: `Bearer ${this.options.apiKey}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          model: call.model,
+          instructions: call.instructions,
+          input: [{ role: "user", content: [{ type: "input_text", text: call.parts.filter(Boolean).join("\n\n") }] }],
+          stream: true
+        })
+      });
 
-    const data = (await response.json()) as OpenAiResponse;
-    return extractOutputText(data)?.trim() ?? null;
+      if (!response.ok || !response.body) {
+        throw new Error(`OpenAI Scene3D generation failed with status ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let sseBuffer = "";
+      let deltaText = "";
+      let finalText: string | null = null;
+
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        watchdog.bump();
+        sseBuffer += decoder.decode(value, { stream: true });
+        let newline: number;
+        while ((newline = sseBuffer.indexOf("\n")) >= 0) {
+          const line = sseBuffer.slice(0, newline).trim();
+          sseBuffer = sseBuffer.slice(newline + 1);
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (!payload || payload === "[DONE]") continue;
+          let event: { type?: string; delta?: string; response?: OpenAiResponse };
+          try {
+            event = JSON.parse(payload);
+          } catch {
+            continue;
+          }
+          if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
+            deltaText += event.delta;
+            call.onDelta?.(event.delta);
+          } else if (event.type === "response.completed" && event.response) {
+            // Authoritative full text (covers any unexpected delta event shape).
+            finalText = extractOutputText(event.response);
+          }
+        }
+      }
+
+      return (finalText ?? deltaText)?.trim() || null;
+    } catch (error) {
+      throw watchdog.describeError(error);
+    } finally {
+      watchdog.dispose();
+    }
   }
 }
 
@@ -275,7 +353,8 @@ export const SCENE3D_SYSTEM_INSTRUCTION = [
   "- Build depth and contrast: a ground/floor plane, one clear focal subject, supporting elements, and varied materials so objects read distinctly.",
   "The camera is a TOP-LEVEL field, never a node. \"light\" is a STRING, never an object.",
   "CAMERAS (optional): provide cameras:[{ id, name, type:\"perspective\"|\"orthographic\", position:[x,y,z], target:[x,y,z], fov?(perspective), zoom?(orthographic) }] plus activeCameraId to define one or more named viewpoints; the active one frames the runtime view. Use this only when the prompt asks for specific/multiple camera angles. A single camera scene can just use the top-level camera field.",
-  "ANIMATION (optional): provide animation:{ duration(seconds), loop?, tracks:[{ id, targetId, property, keyframes:[{ time, value, easing? }] }] }. targetId is a NODE id (or camera id). property is one of position.x/y/z, rotation.x/y/z (radians), scale.x/y/z, scale (uniform), opacity, or target.x/y/z (camera). Keyframe values are ABSOLUTE; the property is fully driven over the timeline. easing is linear|easeIn|easeOut|easeInOut. Example — spin a node: { duration:4, loop:true, tracks:[{ id:\"spin\", targetId:\"planet\", property:\"rotation.y\", keyframes:[{time:0,value:0},{time:4,value:6.283}] }] }. Add animation only when the prompt asks for motion/spinning/orbiting/bobbing/etc.",
+  "ANIMATION (optional): provide animation:{ duration(seconds), loop?, tracks:[{ id, targetId, property, keyframes:[{ time, value, easing? }] }] }. targetId is a NODE id (or camera id). property is one of position.x/y/z, rotation.x/y/z (radians), scale.x/y/z, scale (uniform), opacity, or — for camera targetIds — target.x/y/z (look-at), fov (perspective, degrees), zoom (orthographic). Camera fly-throughs: key the camera's position.x/y/z and target.x/y/z together. Keyframe values are ABSOLUTE; the property is fully driven over the timeline. easing is linear|easeIn|easeOut|easeInOut. Example — spin a node: { duration:4, loop:true, tracks:[{ id:\"spin\", targetId:\"planet\", property:\"rotation.y\", keyframes:[{time:0,value:0},{time:4,value:6.283}] }] }. Add animation only when the prompt asks for motion/spinning/orbiting/bobbing/etc.",
+  "Output COMPACT JSON with no indentation or newlines — whitespace wastes tokens and slows generation.",
   "Example: {\"metadata\":{\"name\":\"Demo\",\"version\":1},\"background\":\"#0b0f17\",\"camera\":{\"position\":[3,2,4],\"target\":[0,1,0],\"fov\":45},\"nodes\":[{\"id\":\"ground\",\"type\":\"mesh\",\"name\":\"Ground\",\"geometry\":{\"kind\":\"box\",\"args\":[20,0.2,20]},\"transform\":{\"position\":[0,-0.1,0]},\"material\":{\"color\":\"#161d2b\",\"roughness\":0.9}},{\"id\":\"key\",\"type\":\"light\",\"name\":\"Key\",\"light\":\"directional\",\"color\":\"#fff1dc\",\"intensity\":2.5,\"transform\":{\"position\":[4,6,3]}}]}",
   "Use only procedural geometry, colours, and lights. No remote URLs, no textures, no external assets."
 ].join(" ");
@@ -290,16 +369,20 @@ export const SCENE3D_REFINE_PREAMBLE = [
 
 const SCENE3D_REFINE_INSTRUCTION = `${SCENE3D_REFINE_PREAMBLE} ${SCENE3D_SYSTEM_INSTRUCTION}`;
 
-// Targeted-diff refine: the model returns a small JSON patch (operations on nodes
-// by id) instead of the whole scene, so unrelated objects and the user's manual
-// edits are preserved verbatim, and far fewer tokens move.
-export const SCENE3D_REFINE_DIFF_PREAMBLE = [
-  "You EDIT an existing Scene3D scene by returning a small JSON PATCH — never the whole scene.",
+// The patch-op format shared by targeted-diff refine and repair: operations on
+// nodes by id instead of the whole scene, so unrelated objects (and the user's
+// manual edits) are preserved verbatim, and far fewer tokens move.
+const SCENE_PATCH_OPS_SPEC = [
   'Output exactly this shape: { "ops": Operation[] }. Each Operation is one of:',
   '- { "op": "update", "id": string, "node": SceneNode } — replace the existing node that has this id with the COMPLETE updated node (same id).',
   '- { "op": "add", "parentId": string | null, "node": SceneNode } — add a new node; parentId is a group id to nest under, or null for the scene root.',
   '- { "op": "remove", "id": string } — delete the node with this id (and its children if it is a group).',
-  '- { "op": "scene", "patch": { background?, fog?, camera?, cameras?, activeCameraId?, animation?, metadata? } } — change scene-level fields only (incl. cameras + keyframe animation).',
+  '- { "op": "scene", "patch": { background?, fog?, camera?, cameras?, activeCameraId?, animation?, metadata? } } — change scene-level fields only (incl. cameras + keyframe animation).'
+].join(" ");
+
+export const SCENE3D_REFINE_DIFF_PREAMBLE = [
+  "You EDIT an existing Scene3D scene by returning a small JSON PATCH — never the whole scene.",
+  SCENE_PATCH_OPS_SPEC,
   "Include ONLY the operations needed for the request. Touch the fewest nodes possible; never restate unchanged nodes.",
   'Match objects the user names (e.g. "the crystal") to the existing node by name/role and update THAT id in place.',
   "Preserve every id and name unless the request is specifically about renaming. New nodes need unique ids and human-readable names.",
@@ -309,12 +392,17 @@ export const SCENE3D_REFINE_DIFF_PREAMBLE = [
 
 export const SCENE3D_REFINE_DIFF_INSTRUCTION = `${SCENE3D_REFINE_DIFF_PREAMBLE} ${SCENE3D_SYSTEM_INSTRUCTION}`;
 
+// Repair is patch-based too: rewriting only the broken nodes is faster, cheaper,
+// and easier for the small repair model than re-emitting the whole document.
+// (The agent still accepts a full Scene3D document as a fallback.)
 export const SCENE3D_REPAIR_INSTRUCTION = [
-  "You repair a Scene3D JSON document after validation, build, or visual-validation failures.",
-  "Make the smallest correction that resolves the diagnostics while preserving the user's intent.",
+  "You repair a Scene3D scene after validation, build, or visual-validation failures by returning a small JSON PATCH against the broken scene — never the whole document.",
+  SCENE_PATCH_OPS_SPEC,
+  "Make the smallest correction that resolves the diagnostics while preserving the user's intent. Include ONLY the operations needed; never restate unchanged nodes; keep node ids and names unchanged.",
   "For validation errors: fix invalid ids, geometry kinds, light kinds, or asset references.",
+  "For spatial issues (overlap, floating, scale): adjust the offending nodes' positions/scale via update ops.",
   "For visual failures (blank/black/flat frame): add or strengthen lights, raise emissive/contrast, reposition the subject into the camera frame, or add a visible mesh.",
-  "Keep the same top-level Scene3D shape and node schema as the original document."
+  "Output COMPACT JSON with no indentation or newlines."
 ].join(" ");
 
 interface OpenAiResponse {

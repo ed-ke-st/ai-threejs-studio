@@ -296,6 +296,57 @@ const retroRocket: Scene3D = {
   ]
 };
 
+// 9. Animation + camera fly-through — keyframe tracks on nodes (continuous spin,
+// eased bobbing) AND on a named camera (position + target + fov push-in). All
+// tracks are symmetric (end values = start values) so loop:true plays seamlessly.
+const tinyPlanetFlyby: Scene3D = {
+  metadata: { name: "Tiny planet flyby", version: 1 },
+  background: "#070b1a",
+  cameras: [{ id: "cam-flyby", name: "Flyby Camera", type: "perspective", position: [7, 3, 8], target: [0, 0.8, 0], fov: 50 }],
+  activeCameraId: "cam-flyby",
+  nodes: [
+    {
+      id: "planet",
+      type: "group",
+      name: "Tiny Planet",
+      transform: { position: [0, 0.8, 0] },
+      children: [
+        { id: "planet-body", type: "mesh", name: "Planet body", geometry: { kind: "icosahedron", args: [1.1, 1] }, material: { color: "#3f8f6e", roughness: 0.9, metalness: 0, flatShading: true } },
+        { id: "planet-ice-cap", type: "mesh", name: "Ice cap", geometry: { kind: "icosahedron", args: [0.42, 0] }, transform: { position: [0, 1, 0] }, material: { color: "#dff3ff", roughness: 0.7, flatShading: true } },
+        { id: "planet-ring", type: "mesh", name: "Ring", geometry: { kind: "torus", args: [1.9, 0.07, 12, 64] }, transform: { rotation: [1.4, 0, 0.2] }, material: { color: "#c9b07a", roughness: 0.6, metalness: 0.3 } }
+      ]
+    },
+    {
+      id: "satellite",
+      type: "group",
+      name: "Satellite",
+      transform: { position: [2.6, 0.7, 0], rotation: [0, 0, 0.3] },
+      children: [
+        { id: "sat-body", type: "mesh", name: "Body", geometry: { kind: "capsule", args: [0.12, 0.3, 6, 12] }, material: { color: "#d8dee6", roughness: 0.35, metalness: 0.7 } },
+        { id: "sat-panel-l", type: "mesh", name: "Left panel", geometry: { kind: "box", args: [0.5, 0.02, 0.22] }, transform: { position: [-0.4, 0, 0] }, material: { color: "#2456b0", roughness: 0.3, metalness: 0.4, emissive: "#16357a", emissiveIntensity: 0.6 } },
+        { id: "sat-panel-r", type: "mesh", name: "Right panel", geometry: { kind: "box", args: [0.5, 0.02, 0.22] }, transform: { position: [0.4, 0, 0] }, material: { color: "#2456b0", roughness: 0.3, metalness: 0.4, emissive: "#16357a", emissiveIntensity: 0.6 } },
+        { id: "sat-beacon", type: "mesh", name: "Beacon", geometry: { kind: "sphere", args: [0.05, 10, 10] }, transform: { position: [0, 0.3, 0] }, material: { color: "#ff5252", roughness: 0.4, emissive: "#ff1744", emissiveIntensity: 2.5 } }
+      ]
+    },
+    { id: "ambient", type: "light", name: "Space ambient", light: "ambient", color: "#2a3a5a", intensity: 0.45 },
+    { id: "sun", type: "light", name: "Sun", light: "directional", color: "#fff1d6", intensity: 2.2, transform: { position: [6, 5, 4] } },
+    { id: "planet-glow", type: "light", name: "Planet glow", light: "point", color: "#5fd6a8", intensity: 4, distance: 7, transform: { position: [0, 0.8, 0] } }
+  ],
+  animation: {
+    duration: 8,
+    loop: true,
+    tracks: [
+      { id: "planet.rotation.y", targetId: "planet", property: "rotation.y", keyframes: [{ time: 0, value: 0 }, { time: 8, value: 6.283 }] },
+      { id: "satellite.position.y", targetId: "satellite", property: "position.y", keyframes: [{ time: 0, value: 0.7 }, { time: 4, value: 1.1, easing: "easeInOut" }, { time: 8, value: 0.7, easing: "easeInOut" }] },
+      { id: "cam.position.x", targetId: "cam-flyby", property: "position.x", keyframes: [{ time: 0, value: 7 }, { time: 4, value: 3.6, easing: "easeInOut" }, { time: 8, value: 7, easing: "easeInOut" }] },
+      { id: "cam.position.y", targetId: "cam-flyby", property: "position.y", keyframes: [{ time: 0, value: 3 }, { time: 4, value: 1.9, easing: "easeInOut" }, { time: 8, value: 3, easing: "easeInOut" }] },
+      { id: "cam.position.z", targetId: "cam-flyby", property: "position.z", keyframes: [{ time: 0, value: 8 }, { time: 4, value: 4.2, easing: "easeInOut" }, { time: 8, value: 8, easing: "easeInOut" }] },
+      { id: "cam.target.x", targetId: "cam-flyby", property: "target.x", keyframes: [{ time: 0, value: 0 }, { time: 4, value: 1.4, easing: "easeInOut" }, { time: 8, value: 0, easing: "easeInOut" }] },
+      { id: "cam.fov", targetId: "cam-flyby", property: "fov", keyframes: [{ time: 0, value: 50 }, { time: 4, value: 42, easing: "easeInOut" }, { time: 8, value: 50, easing: "easeInOut" }] }
+    ]
+  }
+};
+
 interface FewShotExample {
   note: string;
   tags: string[];
@@ -310,7 +361,12 @@ const EXAMPLES: FewShotExample[] = [
   { note: "Building/architecture: massing from boxes, a pyramidal roof, inset door and windows, a chimney, a companion tree, and outdoor sky + sun lighting.", tags: ["building", "house", "cottage", "cabin", "home", "architecture", "tower", "castle", "church", "shop", "hut", "structure", "village"], scene: cottage },
   { note: "Character built from stacked, symmetric primitives (body, head, eyes, arms, legs) with emissive accents and a hero rig.", tags: ["robot", "character", "figure", "person", "humanoid", "mascot", "creature", "android", "bot", "golem", "monster", "hero"], scene: friendlyRobot },
   { note: "Food at small tabletop scale: layered cylinders on a plate, emissive candle flames with a matching glow light, and warm intimate lighting.", tags: ["cake", "dessert", "food", "pastry", "birthday", "sweet", "plate", "pie", "treat", "bakery", "meal", "snack"], scene: birthdayCake },
-  { note: "Sci-fi craft: metallic hull, symmetric fins, emissive thruster and porthole, and a dark space backdrop — mechanical symmetry plus emissive accents.", tags: ["rocket", "spaceship", "spacecraft", "sci-fi", "scifi", "space", "ship", "missile", "shuttle", "launch", "futuristic", "satellite"], scene: retroRocket }
+  { note: "Sci-fi craft: metallic hull, symmetric fins, emissive thruster and porthole, and a dark space backdrop — mechanical symmetry plus emissive accents.", tags: ["rocket", "spaceship", "spacecraft", "sci-fi", "scifi", "space", "ship", "missile", "shuttle", "launch", "futuristic", "satellite"], scene: retroRocket },
+  {
+    note: "Keyframe animation + camera fly-through: a continuous spin (rotation.y over the full duration), eased bobbing (symmetric easeInOut keyframes), and a NAMED camera (cameras + activeCameraId) animated via position/target/fov tracks — all tracks end on their start values so loop:true plays seamlessly.",
+    tags: ["animation", "animated", "animate", "motion", "spin", "spinning", "rotate", "rotating", "orbit", "orbiting", "fly", "flyby", "fly-through", "flythrough", "cinematic", "camera", "keyframe", "bob", "hover", "float", "turntable", "loop", "planet"],
+    scene: tinyPlanetFlyby
+  }
 ];
 
 const FEWSHOT_INTRO =

@@ -37,9 +37,9 @@ async function listOpenAi(key: string): Promise<string[]> {
     .filter((id) => /^(gpt-|o1|o3|o4|chatgpt-)/.test(id))
     // Drop other modalities + specialized variants (audio, image, realtime, search…).
     .filter((id) => !/(audio|transcribe|tts|realtime|whisper|image|search|embedding|moderation|dall|research)/.test(id))
-    // Drop the heavy/slow extended-reasoning tier (…-pro, …-codex-max) — these
-    // routinely exceed the request timeout for synchronous scene generation.
-    .filter((id) => !/-(pro|max)$/.test(id))
+    // The heavy extended-reasoning tier (…-pro, …-codex-max) is allowed: every
+    // generation call streams behind a stall watchdog with connection heartbeats,
+    // so slow models finish instead of hitting a fixed request timeout.
     // Drop dated snapshots (gpt-4o-2024-…, gpt-4-0613) to keep the list clean.
     .filter((id) => !/\d{4}-\d{2}-\d{2}/.test(id) && !/-\d{3,4}$/.test(id))
     .sort();

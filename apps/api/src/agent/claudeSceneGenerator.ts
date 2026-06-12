@@ -13,6 +13,7 @@ import {
   SCENE3D_SYSTEM_INSTRUCTION,
   buildGenerationParts,
   buildRepairParts,
+  createStreamWatchdog,
   type GenerateScene3DInput,
   type RepairScene3DInput,
   type SceneGenerator
@@ -26,7 +27,10 @@ interface ClaudeSceneGeneratorOptions {
   /** Optional cheaper/faster model for the mechanical repair loop. Defaults to `model`. */
   repairModel?: string;
   maxTokens: number;
-  requestTimeoutMs: number;
+  /** Abort when the model stream goes quiet for this long (the failure signal). */
+  stallTimeoutMs: number;
+  /** Generous absolute backstop so a slow-but-healthy model is never cut off. */
+  totalTimeoutMs: number;
 }
 
 const RETURN_JSON = "\n\nReturn only JSON, no markdown.";
@@ -44,7 +48,9 @@ export class ClaudeSceneGenerator implements SceneGenerator {
   private readonly client: Anthropic | null;
 
   constructor(private readonly options: ClaudeSceneGeneratorOptions) {
-    this.client = options.apiKey ? new Anthropic({ apiKey: options.apiKey, timeout: options.requestTimeoutMs }) : null;
+    // The SDK's own timeout is set to the total backstop; the watchdog handles
+    // the meaningful failure mode (a stalled stream) per call.
+    this.client = options.apiKey ? new Anthropic({ apiKey: options.apiKey, timeout: options.totalTimeoutMs }) : null;
   }
 
   get enabled(): boolean {
@@ -52,63 +58,96 @@ export class ClaudeSceneGenerator implements SceneGenerator {
   }
 
   async generate(input: GenerateScene3DInput): Promise<string | null> {
-    if (!this.client) return null;
-    const message = await this.client.messages.create({
+    return this.streamCall({
+      label: `generate (${input.mode ?? "new"})`,
       model: this.options.model,
-      max_tokens: this.options.maxTokens,
       system: this.systemBlocks(input),
-      messages: [{ role: "user", content: this.userText(input) }]
+      user: this.userText(input),
+      signal: input.signal
     });
-    logUsage(`generate (${input.mode ?? "new"})`, this.options.model, message.usage);
-    return extractText(message).trim() || null;
   }
 
   async generateStreaming(input: GenerateScene3DInput, onNode: (node: unknown) => void): Promise<string | null> {
-    if (!this.client) return null;
     const parser = new NodeStreamParser();
-    const stream = this.client.messages.stream({
+    return this.streamCall({
+      label: `generateStreaming (${input.mode ?? "new"})`,
       model: this.options.model,
-      max_tokens: this.options.maxTokens,
       system: this.systemBlocks(input),
-      messages: [{ role: "user", content: this.userText(input) }]
-    });
-    // Emit each top-level node the moment it finishes streaming.
-    stream.on("text", (delta) => {
-      for (const node of parser.push(delta)) {
-        onNode(node);
+      user: this.userText(input),
+      signal: input.signal,
+      // Emit each top-level node the moment it finishes streaming.
+      onDelta: (delta) => {
+        for (const node of parser.push(delta)) {
+          onNode(node);
+        }
       }
     });
-    const final = await stream.finalMessage();
-    logUsage(`generateStreaming (${input.mode ?? "new"})`, this.options.model, final.usage);
-    return extractText(final).trim() || null;
   }
 
   async refineDiff(input: GenerateScene3DInput): Promise<string | null> {
-    if (!this.client) return null;
     // Schema cached (shared with new/refine), diff preamble follows uncached.
-    const message = await this.client.messages.create({
+    return this.streamCall({
+      label: "refineDiff",
       model: this.options.model,
-      max_tokens: this.options.maxTokens,
       system: [
         { type: "text", text: SCENE3D_SYSTEM_INSTRUCTION, cache_control: CACHE },
         { type: "text", text: `${SCENE3D_REFINE_DIFF_PREAMBLE}\n\nReturn only the JSON patch object, no markdown.` }
       ],
-      messages: [{ role: "user", content: this.userText(input) }]
+      user: this.userText(input),
+      signal: input.signal
     });
-    logUsage("refineDiff", this.options.model, message.usage);
-    return extractText(message).trim() || null;
   }
 
   async repair(input: RepairScene3DInput): Promise<string | null> {
-    if (!this.client) return null;
-    const message = await this.client.messages.create({
+    return this.streamCall({
+      label: "repair",
       model: this.options.repairModel ?? this.options.model,
-      max_tokens: this.options.maxTokens,
       system: [{ type: "text", text: REPAIR_SYSTEM, cache_control: CACHE }],
-      messages: [{ role: "user", content: joinParts(buildRepairParts(input)) }]
+      user: joinParts(buildRepairParts(input)),
+      signal: input.signal
     });
-    logUsage("repair", this.options.repairModel ?? this.options.model, message.usage);
-    return extractText(message).trim() || null;
+  }
+
+  // The single model-call path: ALWAYS streams (a long non-streaming request is
+  // the thing that times out on slow/advanced models), guarded by the stall/total
+  // watchdog instead of a fixed wall-clock abort.
+  private async streamCall(call: {
+    label: string;
+    model: string;
+    system: Anthropic.TextBlockParam[];
+    user: string;
+    signal?: AbortSignal;
+    onDelta?: (delta: string) => void;
+  }): Promise<string | null> {
+    if (!this.client) return null;
+    const watchdog = createStreamWatchdog({
+      stallMs: this.options.stallTimeoutMs,
+      totalMs: this.options.totalTimeoutMs,
+      signal: call.signal
+    });
+
+    try {
+      const stream = this.client.messages.stream(
+        {
+          model: call.model,
+          max_tokens: this.options.maxTokens,
+          system: call.system,
+          messages: [{ role: "user", content: call.user }]
+        },
+        { signal: watchdog.signal }
+      );
+      stream.on("text", (delta) => {
+        watchdog.bump();
+        call.onDelta?.(delta);
+      });
+      const final = await stream.finalMessage();
+      logUsage(call.label, call.model, final.usage);
+      return extractText(final).trim() || null;
+    } catch (error) {
+      throw watchdog.describeError(error);
+    } finally {
+      watchdog.dispose();
+    }
   }
 
   // The schema (and, for NEW mode, the full few-shot library) is cached; the

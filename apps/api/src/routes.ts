@@ -283,19 +283,24 @@ export function registerRoutes(
     const useClaude =
       settings.aiProvider === "claude" || (settings.aiProvider !== "openai" && !openAiKey && Boolean(anthropicKey));
 
+    const generationModel = useClaude
+      ? settings.anthropicCodeModel || config.anthropicCodeModel
+      : settings.openAiCodeModel || config.openAiCodeModel;
     const generator: SceneGenerator = useClaude
       ? new ClaudeSceneGenerator({
           apiKey: anthropicKey,
-          model: settings.anthropicCodeModel || config.anthropicCodeModel,
+          model: generationModel,
           repairModel: settings.anthropicRepairModel || config.anthropicRepairModel,
           maxTokens: config.anthropicMaxTokens,
-          requestTimeoutMs: config.modelRequestTimeoutMs
+          stallTimeoutMs: config.modelStallTimeoutMs,
+          totalTimeoutMs: config.modelTotalTimeoutMs
         })
       : new Scene3DGenerator({
           apiKey: openAiKey,
-          model: settings.openAiCodeModel || config.openAiCodeModel,
+          model: generationModel,
           repairModel: settings.openAiRepairModel || config.openAiRepairModel,
-          requestTimeoutMs: config.modelRequestTimeoutMs
+          stallTimeoutMs: config.modelStallTimeoutMs,
+          totalTimeoutMs: config.modelTotalTimeoutMs
         });
     if (!generator.enabled) {
       return reply.code(400).send({ error: useClaude ? "No Anthropic API key is configured." : "No OpenAI API key is configured." });
@@ -326,23 +331,41 @@ export function registerRoutes(
       "cache-control": "no-cache, no-transform",
       "x-accel-buffering": "no"
     });
-    const write = (event: unknown) => reply.raw.write(`${JSON.stringify(event)}\n`);
+    const write = (event: unknown) => {
+      if (!reply.raw.writableEnded) reply.raw.write(`${JSON.stringify(event)}\n`);
+    };
+
+    // A single model call can legally go minutes without a progress event; pings
+    // keep idle-killing proxies/load balancers from dropping the connection (the
+    // client ignores unknown event types). On client disconnect, abort the run so
+    // the in-flight model call stops burning tokens.
+    const heartbeat = setInterval(() => write({ type: "ping" }), 10_000);
+    const abort = new AbortController();
+    request.raw.on("close", () => {
+      if (!reply.raw.writableEnded) abort.abort();
+    });
 
     try {
+      // Tell the client which model is running so the progress UI can show it.
+      write({ type: "meta", model: generationModel });
       const result = await agent.run({
         projectId: id,
         prompt: body.data.prompt,
         retrievedContext,
         mode: body.data.mode,
         selectedObjectId: body.data.selectedObjectId,
+        signal: abort.signal,
         onProgress: (stage) => write({ type: "progress", stage }),
         onNode: body.data.stream ? (node) => write({ type: "partial-node", node }) : undefined
       });
       await projectRepository.touchProject(id);
       write({ type: "result", result });
     } catch (error) {
+      // A failed or cancelled run shouldn't count against the daily quota.
+      await usageService.refund(request.userId, "agentRun").catch(() => {});
       write({ type: "error", message: error instanceof Error ? error.message : "Generation failed." });
     } finally {
+      clearInterval(heartbeat);
       reply.raw.end();
     }
   });
