@@ -8,10 +8,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { useFrame, useThree } from "@react-three/fiber";
-import { Center, Clone, Edges, Environment, Html, useGLTF } from "@react-three/drei";
+import { Center, Clone, Edges, Environment, Html, OrthographicCamera, PerspectiveCamera, useGLTF } from "@react-three/drei";
 import type {
   AnimatableProperty,
   Animation,
+  Camera,
   Geometry,
   LightNode,
   Material,
@@ -21,7 +22,7 @@ import type {
   SceneNode,
   TextureSpec
 } from "./schema";
-import { animationDuration, normalizeTransform, sampleTrack } from "./schema";
+import { DEFAULT_CAMERA, animationDuration, getActiveCamera, normalizeTransform, sampleTrack } from "./schema";
 
 interface SceneViewProps {
   scene: Scene3D;
@@ -32,12 +33,16 @@ interface SceneViewProps {
   /** Controlled playback time (seconds). When set, animation is driven to exactly this
    *  time each frame (editor scrubbing/playhead). When omitted, animation autoplays/loops. */
   animationTime?: number;
+  /** Render the scene's active camera as the default camera (runtime/share/export, and
+   *  the editor's "look through" mode). When false the consumer's Canvas camera is used. */
+  renderActiveCamera?: boolean;
 }
 
-export function SceneView({ scene, selectedId, selectedIds, onSelect, animationTime }: SceneViewProps) {
+export function SceneView({ scene, selectedId, selectedIds, onSelect, animationTime, renderActiveCamera }: SceneViewProps) {
   const ids = selectedIds ?? (selectedId ? [selectedId] : []);
   return (
     <>
+      {renderActiveCamera ? <ActiveCamera camera={getActiveCamera(scene)} /> : null}
       {scene.background ? <color attach="background" args={[scene.background]} /> : null}
       {scene.fog ? <fog attach="fog" args={[scene.fog.color, scene.fog.near, scene.fog.far]} /> : null}
       {scene.environment?.preset ? (
@@ -51,6 +56,19 @@ export function SceneView({ scene, selectedId, selectedIds, onSelect, animationT
       ))}
     </>
   );
+}
+
+// Renders the active camera as the R3F default camera. The consumer's OrbitControls
+// (makeDefault) then attaches to it and uses the camera's `target` for the look-at.
+// Named with the camera id so future camera-target animation can locate it.
+function ActiveCamera({ camera }: { camera: Camera }) {
+  const position = camera.position ?? DEFAULT_CAMERA.position;
+  const near = camera.near ?? 0.1;
+  const far = camera.far ?? 1000;
+  if (camera.type === "orthographic") {
+    return <OrthographicCamera makeDefault name={camera.id} position={position} zoom={camera.zoom ?? 50} near={near} far={far} />;
+  }
+  return <PerspectiveCamera makeDefault name={camera.id} position={position} fov={camera.fov ?? DEFAULT_CAMERA.fov} near={near} far={far} />;
 }
 
 // Drives keyframe animation imperatively. Each frame it advances (or reads the

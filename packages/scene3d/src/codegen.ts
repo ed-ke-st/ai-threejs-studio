@@ -28,7 +28,8 @@ import type { Scene3D } from "./schema";
 export const scene = sceneConfig as unknown as Scene3D;
 
 export function Scene() {
-  return <SceneView scene={scene} />;
+  // The runtime view is framed by the scene's active camera (SceneView owns it).
+  return <SceneView scene={scene} renderActiveCamera />;
 }
 `;
 
@@ -36,14 +37,16 @@ const APP_SOURCE = `import { Component, type ReactNode } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import { Scene, scene } from "./scene/Scene";
+import { getActiveCamera } from "./scene/schema";
 import "./styles.css";
 
 export function App() {
-  const camera = scene.camera ?? {};
+  // SceneView renders the active camera; OrbitControls just needs its target.
+  const camera = getActiveCamera(scene);
   return (
     <main className="app">
       <SceneErrorBoundary>
-        <Canvas shadows camera={{ position: camera.position ?? [3.4, 2.6, 4.4], fov: camera.fov ?? 45 }}>
+        <Canvas shadows>
           <Scene />
           <OrbitControls makeDefault target={camera.target ?? [0, 1, 0]} />
         </Canvas>

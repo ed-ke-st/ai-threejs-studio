@@ -10,10 +10,11 @@ import { Canvas, useThree } from "@react-three/fiber";
 import { ContactShadows, OrbitControls, TransformControls } from "@react-three/drei";
 import type { Object3D } from "three";
 import { SceneView } from "@ai-threejs-studio/scene3d/react";
-import { autoFixScene, findNode, flattenNodes, lintScene, normalizeTransform, updateNode, type LintIssue, type Scene3D, type SceneNode } from "@ai-threejs-studio/scene3d";
+import { autoFixScene, findNode, flattenNodes, getActiveCamera, getCameras, lintScene, normalizeTransform, updateNode, type Camera, type LintIssue, type Scene3D, type SceneNode } from "@ai-threejs-studio/scene3d";
 import { Inspector, MultiInspector } from "./Inspector";
 import { ComposerControls } from "./ComposerControls";
 import { AddObjectMenu } from "./AddObjectMenu";
+import { CameraMenu } from "./CameraMenu";
 import { createNodeFromSpec, type AddSpec } from "./sceneFactory";
 import { composePrompt } from "./promptComposer";
 import { MoveIcon, RedoIcon, RotateIcon, ScaleIcon, TrashIcon, UndoIcon } from "../ui/icons";
@@ -49,6 +50,10 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   const loadUsage = useProjectStore((s) => s.loadUsage);
   const logError = useProjectStore((s) => s.logError);
   const [liveBuild, setLiveBuild] = useState(true);
+  // "Look through" frames the editor viewport through the active camera (what the
+  // runtime sees) instead of the free-orbit editing camera.
+  const [lookThrough, setLookThrough] = useState(false);
+  const orbitRef = useRef<{ object: { position: { x: number; y: number; z: number } }; target: { x: number; y: number; z: number } } | null>(null);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("compose");
@@ -551,7 +556,42 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     return <div className={styles.loading}>Loading scene…</div>;
   }
 
-  const cam = scene.camera ?? {};
+  const cameras = getCameras(scene);
+  const activeCamera = getActiveCamera(scene);
+
+  // Camera CRUD — all routed through applyEdit so they record history + autosave.
+  const round = (n: number) => Math.round(n * 1000) / 1000;
+  const selectCamera = (id: string) => applyEdit((prev) => ({ ...prev, activeCameraId: id }));
+  const patchCamera = (id: string, patch: Partial<Camera>) =>
+    applyEdit((prev) => ({ ...prev, cameras: getCameras(prev).map((c) => (c.id === id ? { ...c, ...patch } : c)) }));
+  const renameCamera = (id: string, name: string) => patchCamera(id, { name });
+  const addCamera = () => {
+    const controls = orbitRef.current;
+    const position = controls ? ([round(controls.object.position.x), round(controls.object.position.y), round(controls.object.position.z)] as [number, number, number]) : activeCamera.position;
+    const target = controls ? ([round(controls.target.x), round(controls.target.y), round(controls.target.z)] as [number, number, number]) : activeCamera.target;
+    applyEdit((prev) => {
+      const existing = getCameras(prev);
+      let n = existing.length + 1;
+      let id = `camera-${n}`;
+      while (existing.some((c) => c.id === id)) id = `camera-${++n}`;
+      const camera: Camera = { id, name: `Camera ${existing.length + 1}`, type: "perspective", position, target, fov: 45 };
+      return { ...prev, cameras: [...existing, camera], activeCameraId: id };
+    });
+  };
+  const deleteCamera = (id: string) =>
+    applyEdit((prev) => {
+      const remaining = getCameras(prev).filter((c) => c.id !== id);
+      if (remaining.length === 0) return prev;
+      return { ...prev, cameras: remaining, activeCameraId: prev.activeCameraId === id ? remaining[0].id : prev.activeCameraId };
+    });
+  const frameCameraFromView = (id: string) => {
+    const controls = orbitRef.current;
+    if (!controls) return;
+    patchCamera(id, {
+      position: [round(controls.object.position.x), round(controls.object.position.y), round(controls.object.position.z)],
+      target: [round(controls.target.x), round(controls.target.y), round(controls.target.z)]
+    });
+  };
 
   return (
     <div className={styles.shell}>
@@ -806,17 +846,30 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
               </div>
             ) : null}
                                                       <AddObjectMenu onAdd={addObject} />
+            <CameraMenu
+              cameras={cameras}
+              activeCameraId={activeCamera.id}
+              lookThrough={lookThrough}
+              onSelect={selectCamera}
+              onAdd={addCamera}
+              onDelete={deleteCamera}
+              onRename={renameCamera}
+              onPatch={patchCamera}
+              onFrameFromView={frameCameraFromView}
+              onToggleLookThrough={() => setLookThrough((v) => !v)}
+            />
 
           </div>
 
-          <Canvas shadows camera={{ position: cam.position ?? [3.4, 2.6, 4.4], fov: cam.fov ?? 45 }} onPointerMissed={() => setSelectedIds([])}>
+          <Canvas shadows camera={{ position: activeCamera.position ?? [3.4, 2.6, 4.4], fov: activeCamera.fov ?? 45 }} onPointerMissed={() => setSelectedIds([])}>
             <SceneView
               scene={scene}
               selectedIds={selectedIds}
               onSelect={(id) => selectNode(id, { additive: additiveRef.current }, visibleNodes)}
+              renderActiveCamera={lookThrough}
             />
             <ContactShadows position={[0, 0.01, 0]} opacity={0.5} scale={20} blur={2.4} far={8} />
-            <OrbitControls makeDefault target={cam.target ?? [0, 1, 0]} />
+            <OrbitControls ref={orbitRef as never} makeDefault target={activeCamera.target ?? [0, 1, 0]} />
             <Gizmo
               selectedId={selectedIds.length === 1 ? primaryId : null}
               mode={gizmoMode}
