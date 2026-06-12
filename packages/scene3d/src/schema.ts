@@ -146,6 +146,7 @@ export type AnimatableProperty =
   | "rotation.x" | "rotation.y" | "rotation.z"
   | "scale.x" | "scale.y" | "scale.z" | "scale"
   | "target.x" | "target.y" | "target.z" // camera look-at
+  | "fov" | "zoom" // camera lens (perspective / orthographic)
   | "opacity";
 
 export const ANIMATABLE_PROPERTIES: AnimatableProperty[] = [
@@ -153,6 +154,7 @@ export const ANIMATABLE_PROPERTIES: AnimatableProperty[] = [
   "rotation.x", "rotation.y", "rotation.z",
   "scale.x", "scale.y", "scale.z", "scale",
   "target.x", "target.y", "target.z",
+  "fov", "zoom",
   "opacity"
 ];
 
@@ -353,6 +355,23 @@ export function upsertAnimationKeyframe(
   }
   const latest = tracks.reduce((max, t) => Math.max(max, t.keyframes[t.keyframes.length - 1]?.time ?? 0), 0);
   return { duration: Math.max(animation?.duration ?? 0, latest), loop: animation?.loop ?? true, tracks };
+}
+
+/** Move a track's keyframe from `fromTime` to `toTime`, replacing any keyframe
+ *  already at the destination. Keeps keyframes sorted and grows duration to
+ *  cover the latest key. No-op when no keyframe exists at `fromTime`. */
+export function moveAnimationKeyframe(animation: Animation, trackId: string, fromTime: number, toTime: number): Animation {
+  const tracks = animation.tracks.map((t) => {
+    if (t.id !== trackId) return t;
+    const moving = t.keyframes.find((k) => Math.abs(k.time - fromTime) <= 1e-4);
+    if (!moving) return t;
+    const kfs = t.keyframes.filter((k) => Math.abs(k.time - fromTime) > 1e-4 && Math.abs(k.time - toTime) > 1e-4);
+    kfs.push({ ...moving, time: Math.max(0, toTime) });
+    kfs.sort((a, b) => a.time - b.time);
+    return { ...t, keyframes: kfs };
+  });
+  const latest = tracks.reduce((max, t) => Math.max(max, t.keyframes[t.keyframes.length - 1]?.time ?? 0), 0);
+  return { ...animation, duration: Math.max(animation.duration, latest), tracks };
 }
 
 /** Remove a whole track. Returns undefined when no tracks remain. */

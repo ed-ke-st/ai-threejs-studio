@@ -11,6 +11,7 @@ import { createPortal } from "react-dom";
 import { GEOMETRY_KINDS } from "@ai-threejs-studio/scene3d";
 import { LIGHT_KINDS, geometryLabel, lightLabel, type AddSpec } from "./sceneFactory";
 import styles from "./AddObjectMenu.module.css";
+import { ObjectIcon } from "../ui/icons";
 
 export function AddObjectMenu({ onAdd }: { onAdd: (spec: AddSpec) => void }) {
   const [open, setOpen] = useState(false);
@@ -68,7 +69,7 @@ export function AddObjectMenu({ onAdd }: { onAdd: (spec: AddSpec) => void }) {
         title="Add object"
         aria-label="Add object"
       >
-        +
+       <ObjectIcon size={14} /> <span className={styles.add}>+</span>
       </button>
       {open && coords
         ? createPortal(

@@ -10,8 +10,8 @@ import { Canvas, useThree } from "@react-three/fiber";
 import { ContactShadows, OrbitControls, TransformControls } from "@react-three/drei";
 import type { Object3D } from "three";
 import { SceneView } from "@ai-threejs-studio/scene3d/react";
-import { animationDuration, autoFixScene, findNode, flattenNodes, getActiveCamera, getCameras, lintScene, normalizeTransform, removeAnimationKeyframe, removeAnimationTrack, updateNode, upsertAnimationKeyframe, type AnimatableProperty, type Camera, type LintIssue, type Scene3D, type SceneNode, type Transform } from "@ai-threejs-studio/scene3d";
-import { Inspector, MultiInspector } from "./Inspector";
+import { DEFAULT_CAMERA, animationDuration, autoFixScene, findNode, flattenNodes, getActiveCamera, getCameras, lintScene, moveAnimationKeyframe, normalizeTransform, removeAnimationKeyframe, removeAnimationTrack, sampleTrack, updateNode, upsertAnimationKeyframe, type AnimatableProperty, type Animation, type Camera, type LintIssue, type Scene3D, type SceneNode, type Transform } from "@ai-threejs-studio/scene3d";
+import { CameraInspector, Inspector, MultiInspector } from "./Inspector";
 import { ComposerControls } from "./ComposerControls";
 import { AddObjectMenu } from "./AddObjectMenu";
 import { CameraMenu } from "./CameraMenu";
@@ -47,6 +47,21 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   const [stage, setStage] = useState("");
   const [agentError, setAgentError] = useState<string | null>(null);
   const [resumePrompt, setResumePrompt] = useState<string | null>(null);
+  // Progress-pill extras: which model is running (from the stream's meta event)
+  // and a ticking elapsed-seconds counter, so long runs visibly make progress.
+  const [genModel, setGenModel] = useState<string | null>(null);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  // Lets the Cancel button abort the in-flight run; the server notices the
+  // closed connection and stops the model call.
+  const generateAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!generating) return;
+    const startedAt = Date.now();
+    setElapsedSec(0);
+    const timer = setInterval(() => setElapsedSec(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [generating]);
   const usage = useProjectStore((s) => s.usage);
   const loadUsage = useProjectStore((s) => s.loadUsage);
   const logError = useProjectStore((s) => s.logError);
@@ -64,6 +79,10 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   // True while the transform gizmo is being dragged — suspends the animation driver
   // so the node follows the gizmo instead of snapping back to its keyframed pose.
   const [gizmoDragging, setGizmoDragging] = useState(false);
+  // True while the user orbits to reframe an animated camera mid-preview — same
+  // driver suspension as the gizmo; the new framing is auto-keyed on release.
+  const [cameraAdjusting, setCameraAdjusting] = useState(false);
+  const cameraAdjustingRef = useRef(false);
   // Refs so the (stable) gizmo-commit handler can read live transport state for auto-key.
   const playheadRef = useRef(0);
   const playingRef = useRef(false);
@@ -233,9 +252,39 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     [queueSave, recordHistory]
   );
 
+  // Commit an Inspector edit. While previewing the timeline the Inspector shows
+  // the pose sampled at the playhead (see `inspectorNode`), so a transform edit
+  // there is auto-keyed on channels that already have tracks — mirroring the
+  // gizmo's behavior. Non-transform edits (material, visibility, …) leave the
+  // base transform and the tracks untouched.
   const handleNodeChange = useCallback(
     (nextNode: SceneNode) => {
-      applyEdit((prev) => ({ ...prev, nodes: updateNode(prev.nodes, nextNode.id, () => nextNode) }));
+      const previewing = playingRef.current || playheadRef.current > 1e-3;
+      const time = Math.round(playheadRef.current * 1000) / 1000;
+      applyEdit((prev) => {
+        const prevNode = findNode(prev.nodes, nextNode.id);
+        if (!previewing || !prev.animation || !prevNode) {
+          return { ...prev, nodes: updateNode(prev.nodes, nextNode.id, () => nextNode) };
+        }
+        const sampled = sampleNodeTransform(prevNode, prev.animation, time);
+        const edited = normalizeTransform(nextNode.transform);
+        if (transformsEqual(edited, sampled)) {
+          // The transform is just the sampled pose echoed back — keep the base.
+          return { ...prev, nodes: updateNode(prev.nodes, nextNode.id, (node) => ({ ...nextNode, transform: node.transform })) };
+        }
+        let animation = prev.animation;
+        const channels: [AnimatableProperty, number][] = [
+          ["position.x", edited.position[0]], ["position.y", edited.position[1]], ["position.z", edited.position[2]],
+          ["rotation.x", edited.rotation[0]], ["rotation.y", edited.rotation[1]], ["rotation.z", edited.rotation[2]],
+          ["scale.x", edited.scale[0]], ["scale.y", edited.scale[1]], ["scale.z", edited.scale[2]], ["scale", edited.scale[0]]
+        ];
+        for (const [property, value] of channels) {
+          if (animation.tracks.some((t) => t.targetId === nextNode.id && t.property === property)) {
+            animation = upsertAnimationKeyframe(animation, nextNode.id, property, time, value);
+          }
+        }
+        return { ...prev, nodes: updateNode(prev.nodes, nextNode.id, () => nextNode), animation };
+      });
     },
     [applyEdit]
   );
@@ -378,7 +427,10 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
       setGenerating(true);
       setAgentError(null);
       setResumePrompt(null);
+      setGenModel(null);
       setStage(activeMode === "refine" ? "Refining the scene" : "Designing the scene");
+      const abort = new AbortController();
+      generateAbortRef.current = abort;
       setSaveState("saving");
       if (scene) recordHistory(scene, true); // standalone undo entry for the generate
       if (streaming) {
@@ -405,6 +457,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
         const response = await fetch(`/api/projects/${projectId}/scene3d/agent-run`, {
           method: "POST",
           headers: { "content-type": "application/json", ...(await authHeaders()) },
+          signal: abort.signal,
           body: JSON.stringify({
             prompt: composed,
             mode: activeMode,
@@ -440,8 +493,9 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
               buffer = buffer.slice(newline + 1);
               if (!line) continue;
               try {
-                const event = JSON.parse(line) as { type: string; stage?: string; node?: SceneNode; result?: { scene: Scene3D }; message?: string };
+                const event = JSON.parse(line) as { type: string; stage?: string; node?: SceneNode; result?: { scene: Scene3D }; message?: string; model?: string };
                 if (event.type === "progress" && event.stage) setStage(event.stage);
+                else if (event.type === "meta" && event.model) setGenModel(event.model);
                 else if (event.type === "partial-node" && event.node && streaming) {
                   const node = event.node;
                   setScene((current) => (current ? { ...current, nodes: [...current.nodes, node] } : current));
@@ -461,11 +515,15 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
           failed(streamError || "Generation failed (no scene was returned).");
         }
       } catch (e) {
-        failed(e instanceof Error ? e.message : "Generation failed.");
+        // A user cancel surfaces as an AbortError — keep any partial work but
+        // don't dress it up as a failure.
+        if (abort.signal.aborted) failed("Generation cancelled.");
+        else failed(e instanceof Error ? e.message : "Generation failed.");
       } finally {
+        generateAbortRef.current = null;
         setGenerating(false);
         setStage("");
-        void loadUsage(); // reflect the consumed (or blocked) generation
+        void loadUsage(); // reflect the consumed (or refunded) generation
       }
     },
     [projectId, prompt, mode, liveBuild, primaryId, styleId, modifierIds, scene, recordHistory, loadUsage, logError, save]
@@ -621,6 +679,34 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     if (selectedIds.length > 0) setMobilePanel("inspector");
   }, [selectedIds]);
 
+  // Commit a camera-inspector edit. While previewing, channels that already have
+  // tracks are auto-keyed at the playhead (the slider drives the keyframe); the
+  // camera's stored values are written through either way.
+  const handleCameraChange = useCallback(
+    (next: Camera) => {
+      const previewing = playingRef.current || playheadRef.current > 1e-3;
+      const time = Math.round(playheadRef.current * 1000) / 1000;
+      applyEdit((prev) => {
+        const withCamera: Scene3D = { ...prev, cameras: getCameras(prev).map((c) => (c.id === next.id ? next : c)) };
+        if (!previewing || !prev.animation) return withCamera;
+        let animation = prev.animation;
+        const channels: [AnimatableProperty, number | undefined][] = [
+          ["position.x", next.position?.[0]], ["position.y", next.position?.[1]], ["position.z", next.position?.[2]],
+          ["target.x", next.target?.[0]], ["target.y", next.target?.[1]], ["target.z", next.target?.[2]],
+          ["fov", next.fov], ["zoom", next.zoom]
+        ];
+        for (const [property, value] of channels) {
+          if (value === undefined) continue;
+          if (animation.tracks.some((t) => t.targetId === next.id && t.property === property)) {
+            animation = upsertAnimationKeyframe(animation, next.id, property, time, value);
+          }
+        }
+        return { ...withCamera, animation };
+      });
+    },
+    [applyEdit]
+  );
+
   if (!scene) {
     return <div className={styles.loading}>Loading scene…</div>;
   }
@@ -651,7 +737,13 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     applyEdit((prev) => {
       const remaining = getCameras(prev).filter((c) => c.id !== id);
       if (remaining.length === 0) return prev;
-      return { ...prev, cameras: remaining, activeCameraId: prev.activeCameraId === id ? remaining[0].id : prev.activeCameraId };
+      // Drop the camera's animation tracks along with it.
+      let animation = prev.animation;
+      if (animation) {
+        const tracks = animation.tracks.filter((t) => t.targetId !== id);
+        animation = tracks.length > 0 ? { ...animation, tracks } : undefined;
+      }
+      return { ...prev, cameras: remaining, activeCameraId: prev.activeCameraId === id ? remaining[0].id : prev.activeCameraId, animation };
     });
   const frameCameraFromView = (id: string) => {
     const controls = orbitRef.current;
@@ -683,6 +775,8 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     applyEdit((prev) => (prev.animation ? { ...prev, animation: removeAnimationTrack(prev.animation, trackId) } : prev));
   const deleteKeyframe = (trackId: string, time: number) =>
     applyEdit((prev) => (prev.animation ? { ...prev, animation: removeAnimationKeyframe(prev.animation, trackId, time) } : prev));
+  const moveKeyframe = (trackId: string, fromTime: number, toTime: number) =>
+    applyEdit((prev) => (prev.animation ? { ...prev, animation: moveAnimationKeyframe(prev.animation, trackId, fromTime, toTime) } : prev));
   // Insert keyframes for the given channels at the playhead, reading the live pose.
   const keyChannels = (channels: AnimatableProperty[]) => {
     const node = selectedNode;
@@ -699,7 +793,84 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     });
     setTimelineOpen(true);
   };
-  const nodeName = (id: string) => findNode(scene.nodes, id)?.name ?? id;
+  const nodeName = (id: string) => findNode(scene.nodes, id)?.name ?? cameras.find((c) => c.id === id)?.name ?? id;
+
+  // Key the active camera's pose (position + look-at target) at the playhead.
+  // When looking through the camera the live orbit framing IS the camera, so key
+  // that; otherwise key the camera's stored values.
+  const keyCameraPose = () => {
+    const cam = activeCamera;
+    const controls = orbitRef.current;
+    const live = lookThrough && controls ? controls : null;
+    const pos: [number, number, number] = live
+      ? [round(live.object.position.x), round(live.object.position.y), round(live.object.position.z)]
+      : cam.position ?? DEFAULT_CAMERA.position;
+    const tgt: [number, number, number] = live
+      ? [round(live.target.x), round(live.target.y), round(live.target.z)]
+      : cam.target ?? DEFAULT_CAMERA.target;
+    const time = round(playhead);
+    applyEdit((prev) => {
+      let animation = prev.animation;
+      const channels: [AnimatableProperty, number][] = [
+        ["position.x", pos[0]], ["position.y", pos[1]], ["position.z", pos[2]],
+        ["target.x", tgt[0]], ["target.y", tgt[1]], ["target.z", tgt[2]]
+      ];
+      for (const [property, value] of channels) {
+        animation = upsertAnimationKeyframe(animation, cam.id, property, time, value);
+      }
+      return { ...prev, animation };
+    });
+    setTimelineOpen(true);
+  };
+
+  // Auto-key the live orbit framing at the playhead, but only on channels that
+  // already have tracks — called when an orbit gesture ends while reframing an
+  // animated camera mid-preview (the camera analogue of the gizmo's auto-key).
+  const keyCameraPoseFromView = () => {
+    const controls = orbitRef.current;
+    if (!controls) return;
+    const cam = activeCamera;
+    const time = round(playheadRef.current);
+    const channels: [AnimatableProperty, number][] = [
+      ["position.x", round(controls.object.position.x)], ["position.y", round(controls.object.position.y)], ["position.z", round(controls.object.position.z)],
+      ["target.x", round(controls.target.x)], ["target.y", round(controls.target.y)], ["target.z", round(controls.target.z)]
+    ];
+    applyEdit((prev) => {
+      if (!prev.animation) return prev;
+      let animation = prev.animation;
+      for (const [property, value] of channels) {
+        if (animation.tracks.some((t) => t.targetId === cam.id && t.property === property)) {
+          animation = upsertAnimationKeyframe(animation, cam.id, property, time, value);
+        }
+      }
+      return { ...prev, animation };
+    });
+  };
+
+  // Key the active camera's lens (fov for perspective, zoom for orthographic).
+  const keyCameraLens = () => {
+    const cam = activeCamera;
+    const time = round(playhead);
+    const [property, value]: [AnimatableProperty, number] =
+      cam.type === "orthographic" ? ["zoom", cam.zoom ?? 50] : ["fov", cam.fov ?? DEFAULT_CAMERA.fov];
+    applyEdit((prev) => ({ ...prev, animation: upsertAnimationKeyframe(prev.animation, cam.id, property, time, value) }));
+    setTimelineOpen(true);
+  };
+
+  const activeCameraAnimated = (scene.animation?.tracks ?? []).some((t) => t.targetId === activeCamera.id);
+
+  // Camera analogue of inspectorNode: while previewing, the camera inspector
+  // shows the playhead-sampled pose/lens so its sliders match the viewport.
+  const inspectorCamera =
+    previewActive && scene.animation ? sampleCameraPose(activeCamera, scene.animation, playhead) : activeCamera;
+
+  // While previewing, the Inspector shows (and edits) the pose sampled at the
+  // playhead instead of the base transform, so its values match the viewport and
+  // edits auto-key tracked channels (see handleNodeChange).
+  const inspectorNode =
+    previewActive && selectedNode && scene.animation
+      ? { ...selectedNode, transform: sampleNodeTransform(selectedNode, scene.animation, playhead) }
+      : selectedNode;
 
   return (
     <div className={styles.shell}>
@@ -745,6 +916,11 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
                 <button className={styles.button} onClick={() => void generate()} disabled={generating || !prompt.trim()}>
                   {generating ? (mode === "refine" ? "Refining…" : "Generating…") : mode === "refine" ? "Refine" : "Generate"}
                 </button>
+                {generating ? (
+                  <button className={styles.button} onClick={() => generateAbortRef.current?.abort()} title="Stop this generation (keeps any objects already built)">
+                    Cancel
+                  </button>
+                ) : null}
 
                 <span className={styles.spacer} />
                 {usage && usage.agentRun.limit != null ? (
@@ -755,7 +931,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
                 {generating && stage ? (
                   <span className={styles.progressPill}>
                     <span className={styles.pulseDot} />
-                    {stage}…
+                    {stage}…{genModel ? ` · ${genModel}` : ""} · {formatElapsed(elapsedSec)}
                   </span>
                 ) : (
                   <span className={saveBadgeClass(saveState)}>{saveLabel(saveState)}</span>
@@ -964,7 +1140,10 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
               onRename={renameCamera}
               onPatch={patchCamera}
               onFrameFromView={frameCameraFromView}
-              onToggleLookThrough={() => setLookThrough((v) => !v)}
+              onSetLookThrough={setLookThrough}
+              onKeyPose={keyCameraPose}
+              onKeyLens={keyCameraLens}
+              playhead={playhead}
             />
 
           </div>
@@ -976,11 +1155,30 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
               onSelect={(id) => selectNode(id, { additive: additiveRef.current }, visibleNodes)}
               renderActiveCamera={lookThrough}
               animationTime={playhead}
-              suppressAnimation={!previewActive || gizmoDragging}
+              suppressAnimation={!previewActive || gizmoDragging || cameraAdjusting}
             />
             <RootCapture target={sceneRootRef} />
             <ContactShadows position={[0, 0.01, 0]} opacity={0.5} scale={20} blur={2.4} far={8} />
-            <OrbitControls ref={orbitRef as never} makeDefault target={activeCamera.target ?? [0, 1, 0]} />
+            {/* Orbiting through an animated camera mid-preview pauses playback,
+                suspends the driver (so the user can reframe instead of fighting
+                it), and auto-keys the new framing at the playhead on release. */}
+            <OrbitControls
+              ref={orbitRef as never}
+              makeDefault
+              target={activeCamera.target ?? [0, 1, 0]}
+              onStart={() => {
+                if (!(lookThrough && activeCameraAnimated && (playingRef.current || playheadRef.current > 1e-3))) return;
+                setPlaying(false);
+                cameraAdjustingRef.current = true;
+                setCameraAdjusting(true);
+              }}
+              onEnd={() => {
+                if (!cameraAdjustingRef.current) return;
+                cameraAdjustingRef.current = false;
+                setCameraAdjusting(false);
+                keyCameraPoseFromView();
+              }}
+            />
             <Gizmo
               selectedId={selectedIds.length === 1 ? primaryId : null}
               mode={gizmoMode}
@@ -1009,6 +1207,16 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
             onKey={keyChannels}
             onDeleteTrack={deleteTrack}
             onDeleteKeyframe={deleteKeyframe}
+            onMoveKeyframe={moveKeyframe}
+            onSelectNode={(id) => {
+              // Camera tracks: make that camera active, look through it, and clear
+              // the node selection so the camera inspector takes over the pane.
+              if (cameras.some((c) => c.id === id)) {
+                selectCamera(id);
+                setLookThrough(true);
+                setSelectedIds([]);
+              } else setSelectedIds([id]);
+            }}
           />
           ) : null}
         </main>
@@ -1032,9 +1240,16 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
                   collapsed={paneCollapsed}
                   onToggleCollapse={isWide ? () => setInspectorCollapsed((v) => !v) : undefined}
                 />
+              ) : selectedNodes.length === 0 && lookThrough ? (
+                <CameraInspector
+                  camera={inspectorCamera}
+                  onChange={handleCameraChange}
+                  collapsed={paneCollapsed}
+                  onToggleCollapse={isWide ? () => setInspectorCollapsed((v) => !v) : undefined}
+                />
               ) : (
                 <Inspector
-                  node={selectedNode}
+                  node={inspectorNode}
                   onChange={handleNodeChange}
                   onUploadImage={uploadImage}
                   collapsed={paneCollapsed}
@@ -1106,6 +1321,62 @@ function readChannel(obj: Object3D | null, channel: AnimatableProperty, fallback
     case "scale": return obj ? obj.scale.x : fallback.scale[0];
     default: return 0; // opacity / camera target — not keyed via the v1 buttons
   }
+}
+
+// Pose of `node` at `time`: its animation tracks applied over the base transform,
+// in track order — matching SceneView playback exactly (a later uniform "scale"
+// track overrides earlier per-axis ones, and vice versa).
+function sampleNodeTransform(node: SceneNode, animation: Animation, time: number): Transform {
+  const base = normalizeTransform(node.transform);
+  const position = [...base.position] as [number, number, number];
+  const rotation = [...base.rotation] as [number, number, number];
+  const scale = [...base.scale] as [number, number, number];
+  const vectors: Record<string, [number, number, number]> = { position, rotation, scale };
+  const axes: Record<string, number> = { x: 0, y: 1, z: 2 };
+  for (const track of animation.tracks) {
+    if (track.targetId !== node.id) continue;
+    const value = sampleTrack(track, time);
+    if (value === undefined) continue;
+    const [prop, axis] = track.property.split(".");
+    if (axis !== undefined && vectors[prop] && axes[axis] !== undefined) vectors[prop][axes[axis]] = value;
+    else if (track.property === "scale") scale.fill(value);
+  }
+  return { position, rotation, scale };
+}
+
+// Camera analogue of sampleNodeTransform: the camera's pose/lens with its
+// animation tracks applied at `time` (track order, matching SceneView playback).
+function sampleCameraPose(camera: Camera, animation: Animation, time: number): Camera {
+  const tracks = animation.tracks.filter((t) => t.targetId === camera.id);
+  if (tracks.length === 0) return camera;
+  const position = [...(camera.position ?? DEFAULT_CAMERA.position)] as [number, number, number];
+  const target = [...(camera.target ?? DEFAULT_CAMERA.target)] as [number, number, number];
+  let fov = camera.fov;
+  let zoom = camera.zoom;
+  const axes: Record<string, number> = { x: 0, y: 1, z: 2 };
+  for (const track of tracks) {
+    const value = sampleTrack(track, time);
+    if (value === undefined) continue;
+    const [prop, axis] = track.property.split(".");
+    if (prop === "position" && axis !== undefined) position[axes[axis]] = value;
+    else if (prop === "target" && axis !== undefined) target[axes[axis]] = value;
+    else if (track.property === "fov") fov = value;
+    else if (track.property === "zoom") zoom = value;
+  }
+  return { ...camera, position, target, fov, zoom };
+}
+
+// "1:42" — elapsed time shown in the generation progress pill.
+function formatElapsed(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function transformsEqual(a: Transform, b: Transform): boolean {
+  const fa = [...a.position, ...a.rotation, ...a.scale];
+  const fb = [...b.position, ...b.rotation, ...b.scale];
+  return fa.every((v, i) => Math.abs(v - fb[i]) < 1e-6);
 }
 
 type GizmoMode = "translate" | "rotate" | "scale";

@@ -52,7 +52,7 @@ export function SceneView({ scene, selectedId, selectedIds, onSelect, animationT
         <Environment preset={scene.environment.preset as never} environmentIntensity={scene.environment.intensity ?? 1} />
       ) : null}
       {scene.animation && scene.animation.tracks.length > 0 && !suppressAnimation ? (
-        <AnimationDriver animation={scene.animation} time={animationTime} />
+        <AnimationDriver animation={scene.animation} time={animationTime} camera={renderActiveCamera ? getActiveCamera(scene) : undefined} />
       ) : null}
       {scene.nodes.map((node) => (
         <NodeView key={node.id} node={node} selectedIds={ids} onSelect={onSelect} />
@@ -77,14 +77,22 @@ function ActiveCamera({ camera }: { camera: Camera }) {
 // Drives keyframe animation imperatively. Each frame it advances (or reads the
 // controlled) time, samples every track, and mutates the matching node's Object3D
 // directly — found by name (NodeView sets name={node.id}). Mutating refs instead
-// of React state keeps playback off the render path. Camera-target tracks are a
-// no-op here (no object by that name); the camera UI phase handles those.
-function AnimationDriver({ animation, time }: { animation: Animation; time?: number }) {
+// of React state keeps playback off the render path.
+//
+// When `camera` is set (renderActiveCamera mode) and it has tracks, the driver also
+// rigs the default camera: position tracks land via the name lookup (ActiveCamera
+// is named with the camera id), then the camera is aimed at its — possibly
+// target-track-animated — look-at point, and fov/zoom lens tracks are applied.
+// Consumers must keep OrbitControls out of the way while this runs (the editor
+// disables them during preview; codegen's runtime disables them permanently when
+// the active camera is animated).
+function AnimationDriver({ animation, time, camera }: { animation: Animation; time?: number; camera?: Camera }) {
   const root = useThree((state) => state.scene);
   const clock = useRef(0);
   const duration = useMemo(() => animationDuration(animation), [animation]);
+  const lookAt = useRef(new THREE.Vector3());
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     let t: number;
     if (typeof time === "number") {
       t = time;
@@ -101,6 +109,35 @@ function AnimationDriver({ animation, time }: { animation: Animation; time?: num
       if (value === undefined) continue;
       applyAnimatedProperty(obj, track.property, value);
     }
+
+    if (!camera || state.camera.name !== camera.id) return;
+    const cameraTracks = animation.tracks.filter((track) => track.targetId === camera.id);
+    if (cameraTracks.length === 0) return;
+    const cam = state.camera;
+    const base = camera.target ?? DEFAULT_CAMERA.target;
+    lookAt.current.set(base[0], base[1], base[2]);
+    let lensChanged = false;
+    for (const track of cameraTracks) {
+      const value = sampleTrack(track, t);
+      if (value === undefined) continue;
+      switch (track.property) {
+        case "target.x": lookAt.current.x = value; break;
+        case "target.y": lookAt.current.y = value; break;
+        case "target.z": lookAt.current.z = value; break;
+        case "fov":
+          if ((cam as THREE.PerspectiveCamera).isPerspectiveCamera) {
+            (cam as THREE.PerspectiveCamera).fov = value;
+            lensChanged = true;
+          }
+          break;
+        case "zoom":
+          cam.zoom = value;
+          lensChanged = true;
+          break;
+      }
+    }
+    cam.lookAt(lookAt.current);
+    if (lensChanged) cam.updateProjectionMatrix();
   });
 
   return null;

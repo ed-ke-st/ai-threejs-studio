@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { ComponentType } from "react";
 import { createPortal } from "react-dom";
 import { Euler, Vector3 } from "three";
-import type { LightNode, MeshNode, SceneNode, Transform, Vec3 } from "@ai-threejs-studio/scene3d";
-import { GEOMETRY_KINDS, TEXTURE_PATTERNS, normalizeTransform } from "@ai-threejs-studio/scene3d";
-import { ChevronDownIcon, LightIcon, MaterialIcon, SetupIcon, TextureIcon, TransformIcon, type IconProps } from "../ui/icons";
+import type { Camera, LightNode, MeshNode, SceneNode, Transform, Vec3 } from "@ai-threejs-studio/scene3d";
+import { DEFAULT_CAMERA, GEOMETRY_KINDS, TEXTURE_PATTERNS, normalizeTransform } from "@ai-threejs-studio/scene3d";
+import { CameraIcon, ChevronDownIcon, LightIcon, MaterialIcon, SetupIcon, TextureIcon, TransformIcon, type IconProps } from "../ui/icons";
 import styles from "./Inspector.module.css";
 
 interface InspectorProps {
@@ -243,6 +243,82 @@ export function Inspector({ node, onChange, onUploadImage, collapsed = false, on
       </div>
 
       <div className={styles.scrollArea}>{renderTab(activeTab)}</div>
+    </div>
+  );
+}
+
+interface CameraInspectorProps {
+  /** The camera to edit — pass playhead-sampled values while previewing so the
+   *  sliders match the viewport (the editor auto-keys edits then). */
+  camera: Camera;
+  onChange: (next: Camera) => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+}
+
+// Slider editing for the active camera — position, look-at target, and lens —
+// shown when no node is selected and the viewport looks through a camera. The
+// same controls (and ranges) as node transforms, so camera keyframes can be
+// fine-tuned numerically instead of only by orbiting.
+export function CameraInspector({ camera, onChange, collapsed = false, onToggleCollapse }: CameraInspectorProps) {
+  const position = camera.position ?? DEFAULT_CAMERA.position;
+  const target = camera.target ?? DEFAULT_CAMERA.target;
+  const type = camera.type ?? "perspective";
+
+  // Always emit fully-populated position/target so edits key cleanly.
+  const emit = (patch: Partial<Camera>) => onChange({ ...camera, position: [...position], target: [...target], ...patch });
+  const setVec = (key: "position" | "target", axis: number, value: number) => {
+    const next = [...(key === "position" ? position : target)] as Vec3;
+    next[axis] = value;
+    emit({ [key]: next });
+  };
+
+  const renderBody = () => (
+    <section className={styles.section}>
+      <div className={styles.sectionHeader}>
+        <strong>Camera</strong>
+        <span>Position, look-at target, and lens</span>
+      </div>
+      <FieldGroup title="Position" defaultOpen>
+        <VectorField label="Position" value={position} onChange={(axis, value) => setVec("position", axis, value)} min={-25} max={25} step={0.1} />
+      </FieldGroup>
+      <FieldGroup title="Target" defaultOpen>
+        <VectorField label="Target" value={target} onChange={(axis, value) => setVec("target", axis, value)} min={-25} max={25} step={0.1} />
+      </FieldGroup>
+      <FieldGroup title="Lens" defaultOpen>
+        {type === "perspective" ? (
+          <NumberRow label="FOV" value={camera.fov ?? DEFAULT_CAMERA.fov} min={10} max={120} step={1} onChange={(value) => emit({ fov: value })} />
+        ) : (
+          <NumberRow label="Zoom" value={camera.zoom ?? 50} min={10} max={200} step={1} onChange={(value) => emit({ zoom: value })} />
+        )}
+      </FieldGroup>
+    </section>
+  );
+
+  if (collapsed) {
+    const sections: RailSection[] = [{ id: "camera", label: "Camera", icon: CameraIcon, render: renderBody }];
+    return <CollapsedRail title={camera.name ?? camera.id} sections={sections} onToggleCollapse={onToggleCollapse} />;
+  }
+
+  return (
+    <div className={styles.root}>
+      <header className={styles.summaryCard}>
+        <div className={styles.summaryTop}>
+          <div className={styles.summaryMeta}>
+            <span className={styles.kindBadge}>camera</span>
+            <span className={styles.summaryPill}>{type}</span>
+          </div>
+          {onToggleCollapse ? (
+            <button className={styles.collapseBtn} onClick={onToggleCollapse} title="Collapse inspector" aria-label="Collapse inspector">
+              <ChevronDownIcon className={styles.collapseIcon} />
+            </button>
+          ) : null}
+        </div>
+        <div className={styles.title}>{camera.name ?? camera.id}</div>
+        <div className={styles.subtitle}>{camera.id}</div>
+      </header>
+
+      <div className={styles.scrollArea}>{renderBody()}</div>
     </div>
   );
 }

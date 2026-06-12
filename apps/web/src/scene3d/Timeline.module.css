@@ -3,7 +3,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(14, 19, 27, 0.94);
+  background: var(--c-surface-glass);
   border-top: 1px solid #2a3442;
   backdrop-filter: blur(6px);
   color: #cbd5e1;
@@ -61,8 +61,12 @@
   align-items: center;
   justify-content: center;
 }
-.iconBtn:hover {
+.iconBtn:hover:not(:disabled) {
   border-color: #3a4757;
+}
+.iconBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .iconBtnActive {
   background: #2563eb;
@@ -144,6 +148,30 @@
   flex-direction: column;
   gap: 4px;
 }
+.groupBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.groupLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #cbd5e1;
+  font-weight: 600;
+}
+.caret {
+  background: none;
+  border: none;
+  color: #9fb2c8;
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 10px;
+  line-height: 1;
+}
+.caret:hover {
+  color: #e2e8f0;
+}
 .lane {
   display: grid;
   grid-template-columns: 150px 1fr 24px;
@@ -182,10 +210,34 @@
   background: #38bdf8;
   border: 1px solid #0b1119;
   border-radius: 2px;
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
+  z-index: 3;
 }
 .key:hover {
   background: #f87171;
+}
+.keySelected,
+.keySelected:hover {
+  background: #f87171;
+  box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.35);
+}
+.keyDragging,
+.keyDragging:hover,
+.keySelected.keyDragging {
+  background: #f59e0b;
+  box-shadow: none;
+  cursor: grabbing;
+  z-index: 4;
+}
+/* Read-only summary diamonds on a collapsed group's aggregate lane. */
+.keyAgg {
+  background: #1c2836;
+  border-color: #38bdf8;
+  cursor: pointer;
+}
+.keyAgg:hover {
+  background: #38bdf8;
 }
 .deleteTrack {
   background: none;

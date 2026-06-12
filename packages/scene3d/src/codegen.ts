@@ -42,13 +42,16 @@ import "./styles.css";
 
 export function App() {
   // SceneView renders the active camera; OrbitControls just needs its target.
+  // When the active camera itself is animated, the animation driver owns the
+  // camera every frame, so user orbiting is disabled rather than fighting it.
   const camera = getActiveCamera(scene);
+  const cameraAnimated = (scene.animation?.tracks ?? []).some((track) => track.targetId === camera.id);
   return (
     <main className="app">
       <SceneErrorBoundary>
         <Canvas shadows>
           <Scene />
-          <OrbitControls makeDefault target={camera.target ?? [0, 1, 0]} />
+          <OrbitControls makeDefault enabled={!cameraAnimated} target={camera.target ?? [0, 1, 0]} />
         </Canvas>
       </SceneErrorBoundary>
     </main>

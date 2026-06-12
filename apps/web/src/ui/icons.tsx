@@ -239,3 +239,28 @@ export function RedoIcon({ size, ...props }: IconProps) {
     </svg>
   );
 }
+export function CameraIcon({ size, ...props }: IconProps) {
+  const resolved = resolveSize(size, 14);
+  return (
+
+<svg  viewBox="0 -960 960 960" width={resolved} height={resolved} fill="currentColor" {...props}><path d="M480-260q75 0 127.5-52.5T660-440q0-75-52.5-127.5T480-620q-75 0-127.5 52.5T300-440q0 75 52.5 127.5T480-260Zm0-80q-42 0-71-29t-29-71q0-42 29-71t71-29q42 0 71 29t29 71q0 42-29 71t-71 29ZM160-120q-33 0-56.5-23.5T80-200v-480q0-33 23.5-56.5T160-760h126l74-80h240l74 80h126q33 0 56.5 23.5T880-680v480q0 33-23.5 56.5T800-120H16₀v48₀Zm3₂₀-₂₄₀Z"/></svg>
+  );
+}
+
+export function CameraOffIcon({ size, ...props }: IconProps) {
+  const resolved = resolveSize(size, 14);
+  return (
+    <svg viewBox="0 -960 960 960" width={resolved} height={resolved} fill="currentColor" {...props}>
+<path d="m880-195-80-80v-405H638l-73-80H395l-38 42-57-57 60-65h240l74 80h126q33 0 56.5 23.5T880-680v485Zm-720 75q-33 0-56.5-23.5T80-200v-480q0-33 23.5-56.5T160-760h41l80 80H160v480h601l80 80H160Zm466-215q-25 34-62.5 54.5T480-260q-75 0-127.5-52.5T300-440q0-46 20.5-83.5T375-586l58 58q-24 13-38.5 36T380-440q0 42 29 71t71 29q29 0 52-14.5t36-38.5l58 58Zm-18-233q25 24 38.5 57t13.5 71v12q0 6-1 12L456-619q6-1 12-1h12q38 0 71 13.5t57 38.5ZM819-28 27-820l57-57L876-85l-57 57ZM407-440Zm171-57Z"/>
+</svg>
+  );
+}
+
+export function ObjectIcon({ size, ...props }: IconProps) {
+  const resolved = resolveSize(size, 14);
+  return (
+    <svg width={resolved} height={resolved} viewBox="0 -960 960 960" fill="currentColor" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...props}>
+     <path d="M440-183v-274L200-596v274l240 139Zm80 0 240-139v-274L520-457v274Zm-40-343 237-137-237-137-237 137 237 137ZM160-252q-19-11-29.5-29T120-321v-318q0-22 10.5-40t29.5-29l280-161q19-11 40-11t40 11l280 161q19 11 29.5 29t10.5 40v318q0 22-10.5 40T800-252L520-91q-19 11-40 11t-40-11L160-252Zm320-228Z"/>
+    </svg>
+  );
+}

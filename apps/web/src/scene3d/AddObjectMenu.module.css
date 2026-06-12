@@ -1,20 +1,31 @@
 .wrap {
   position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .addBtn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  padding: 4px;
   background: transparent;
   color: var(--c-text-muted);
   border: 1px solid var(--c-border);
   border-radius: var(--radius-sm);
-  font-size: 14px;
+  font-size: 11px;
   line-height: 1;
   cursor: pointer;
+  font-weight: 600;
+  gap: 4px;
+}
+
+.add {
+  font-size: 10px;
+  position: absolute;
+  bottom: 0.3rem;
+  right: 0.1rem;
 }
 
 .addBtn:hover {
@@ -29,7 +40,7 @@
   min-width: 150px;
   max-height: 60vh;
   overflow-y: auto;
-  background: var(--c-bg-panel);
+  background: var(--c-surface-glass);
   border: 1px solid #223047;
   border-radius: 10px;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
@@ -38,6 +49,7 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
+  backdrop-filter: blur(12px);
 }
 
 .section {

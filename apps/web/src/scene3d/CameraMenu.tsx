@@ -1,7 +1,9 @@
 // CameraMenu — a "Cameras" button in the viewport toolbar that opens a popover to
-// switch between the scene's cameras, add/delete/rename them, set their type/fov,
-// capture the current viewport framing into a camera, and toggle "look through"
-// (preview the editor through the active camera, exactly as the runtime sees it).
+// pick the view (free-orbit "Default view" or look through a scene camera),
+// add/delete/rename cameras, set their type/lens/clipping, capture the current
+// viewport framing into a camera, and key the camera's pose or lens at the
+// timeline playhead. Selecting a camera both makes it active (the runtime/export
+// view) and looks through it; "Default view" returns to the free editor orbit.
 //
 // Reuses the AddObjectMenu popover styling + portal/anchor pattern so it isn't
 // clipped by the horizontally-scrolling gizmo bar.
@@ -10,6 +12,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CAMERA_TYPES, type Camera, type CameraType } from "@ai-threejs-studio/scene3d";
 import styles from "./AddObjectMenu.module.css";
+import { CameraIcon, CameraOffIcon } from "../ui/icons";
+
 
 export interface CameraMenuProps {
   cameras: Camera[];
@@ -21,7 +25,12 @@ export interface CameraMenuProps {
   onRename: (id: string, name: string) => void;
   onPatch: (id: string, patch: Partial<Camera>) => void;
   onFrameFromView: (id: string) => void;
-  onToggleLookThrough: () => void;
+  onSetLookThrough: (value: boolean) => void;
+  /** Key the active camera's position + target at the playhead. */
+  onKeyPose: () => void;
+  /** Key the active camera's fov (perspective) or zoom (orthographic) at the playhead. */
+  onKeyLens: () => void;
+  playhead: number;
 }
 
 export function CameraMenu({
@@ -34,7 +43,10 @@ export function CameraMenu({
   onRename,
   onPatch,
   onFrameFromView,
-  onToggleLookThrough
+  onSetLookThrough,
+  onKeyPose,
+  onKeyLens,
+  playhead
 }: CameraMenuProps) {
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
@@ -85,9 +97,9 @@ export function CameraMenu({
         aria-expanded={open}
         title="Cameras"
         aria-label="Cameras"
-        style={{ width: "auto", padding: "0 10px", fontSize: 12, fontWeight: 600 }}
       >
-        {lookThrough ? "🎥" : "📷"} {active?.name ?? "Camera"}
+        
+        {lookThrough ? <CameraIcon size={14} /> : <CameraOffIcon size={14} />} {lookThrough ? active?.name ?? "Camera" : "Default view"}
       </button>
       {open && coords
         ? createPortal(
@@ -97,13 +109,26 @@ export function CameraMenu({
               style={{ position: "fixed", top: coords.top, left: coords.left, right: "auto", width: 240 }}
               role="menu"
             >
+              <div className={styles.section}>View</div>
+              <button
+                className={styles.item}
+                onClick={() => onSetLookThrough(false)}
+                style={{ fontWeight: !lookThrough ? 700 : 400 }}
+              >
+                {!lookThrough ? "● " : "○ "}Default view (free orbit)
+              </button>
+
               <div className={styles.section}>Cameras</div>
               {cameras.map((cam) => (
                 <button
                   key={cam.id}
                   className={styles.item}
-                  onClick={() => onSelect(cam.id)}
-                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: cam.id === activeCameraId ? 700 : 400 }}
+                  onClick={() => {
+                    onSelect(cam.id);
+                    onSetLookThrough(true);
+                  }}
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: lookThrough && cam.id === activeCameraId ? 700 : 400 }}
+                  title={cam.id === activeCameraId ? "Active camera (runtime/export view) — click to look through" : "Click to make active and look through"}
                 >
                   <span>{cam.id === activeCameraId ? "● " : "○ "}{cam.name ?? cam.id}</span>
                   {cameras.length > 1 ? (
@@ -184,11 +209,40 @@ export function CameraMenu({
                     </label>
                   )}
 
+                  <label style={rowStyle}>
+                    <span style={labelStyle}>Near</span>
+                    <input
+                      type="number"
+                      min={0.01}
+                      step={0.1}
+                      value={active.near ?? 0.1}
+                      onChange={(e) => onPatch(active.id, { near: Math.max(0.01, Number(e.target.value) || 0.01) })}
+                      style={inputStyle}
+                    />
+                  </label>
+                  <label style={rowStyle}>
+                    <span style={labelStyle}>Far</span>
+                    <input
+                      type="number"
+                      min={1}
+                      step={10}
+                      value={active.far ?? 1000}
+                      onChange={(e) => onPatch(active.id, { far: Math.max(1, Number(e.target.value) || 1000) })}
+                      style={inputStyle}
+                    />
+                  </label>
+
                   <button className={styles.item} onClick={() => onFrameFromView(active.id)}>
                     Set position from current view
                   </button>
-                  <button className={styles.item} onClick={onToggleLookThrough} style={{ fontWeight: lookThrough ? 700 : 400 }}>
-                    {lookThrough ? "✓ Looking through camera" : "Look through camera"}
+
+                  <div className={styles.divider} />
+                  <div className={styles.section}>Animate @ {playhead.toFixed(2)}s</div>
+                  <button className={styles.item} onClick={onKeyPose}>
+                    + Key position &amp; target
+                  </button>
+                  <button className={styles.item} onClick={onKeyLens}>
+                    + Key {(active.type ?? "perspective") === "perspective" ? "FOV" : "zoom"}
                   </button>
                 </>
               ) : null}
