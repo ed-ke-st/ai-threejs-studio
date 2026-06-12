@@ -42,6 +42,33 @@ export interface TimelineProps {
   onSelectNode: (nodeId: string) => void;
 }
 
+// Panel height chosen by dragging the top edge, persisted editor-wide. Null
+// until the user resizes for the first time — the panel then auto-sizes to its
+// content as before.
+const HEIGHT_KEY = "s3d:timelineHeight";
+const MIN_HEIGHT = 140;
+
+function loadHeight(): number | null {
+  try {
+    const value = Number(localStorage.getItem(HEIGHT_KEY));
+    return Number.isFinite(value) && value >= MIN_HEIGHT ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveHeight(value: number): void {
+  try {
+    localStorage.setItem(HEIGHT_KEY, String(Math.round(value)));
+  } catch {
+    // localStorage unavailable — height just won't persist.
+  }
+}
+
+function clampHeight(value: number): number {
+  return Math.min(Math.max(value, MIN_HEIGHT), Math.round(window.innerHeight * 0.7));
+}
+
 // Collapse state of timeline groups, persisted editor-wide (same pattern as the
 // inspector-collapsed preference in Scene3DEditor).
 const COLLAPSED_KEY = "s3d:timelineCollapsed";
@@ -139,25 +166,70 @@ export function Timeline(props: TimelineProps) {
   const dragGeom = useRef<DragGeom | null>(null);
   const [selectedKey, setSelectedKey] = useState<KeyRef | null>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(loadCollapsed);
-
-  if (!open) {
-    const count = animation?.tracks.length ?? 0;
-    return (
-      <div className={styles.collapsedBar}>
-        <button className={styles.toggleBtn} onClick={props.onToggleOpen} title="Open animation timeline">
-          ▸ Animation{count > 0 ? ` (${count})` : ""}
-        </button>
-      </div>
-    );
-  }
+  const [height, setHeight] = useState<number | null>(loadHeight);
+  // Resize-drag geometry captured at pointerdown (panel measured then, so the
+  // first drag starts from the auto-sized height).
+  const resize = useRef<{ startY: number; startHeight: number } | null>(null);
 
   const span = duration > 0 ? duration : 1;
   const loop = animation?.loop !== false;
   const tracks = animation?.tracks ?? [];
-  const objects = buildGroups(tracks);
   const allTimes = keyTimes(tracks);
   const prevTime = [...allTimes].reverse().find((t) => t < playhead - 1e-3);
   const nextTime = allTimes.find((t) => t > playhead + 1e-3);
+
+  // Collapsed: a slim full-width transport bar (the inspector-rail analogue) —
+  // play/scrub stay usable while the track lanes are tucked away.
+  if (!open) {
+    return (
+      <div className={styles.miniBar}>
+        <button className={styles.toggleBtn} onClick={props.onToggleOpen} title="Open animation timeline">
+          ▸ Animation{tracks.length > 0 ? ` (${tracks.length})` : ""}
+        </button>
+        {tracks.length > 0 ? (
+          <>
+            <button className={styles.iconBtn} onClick={props.onPlayPause} title={playing ? "Pause" : "Play"} aria-label={playing ? "Pause" : "Play"}>
+              {playing ? "⏸" : "▶"}
+            </button>
+            <button
+              className={styles.iconBtn}
+              disabled={prevTime === undefined}
+              onClick={() => prevTime !== undefined && props.onSeek(prevTime)}
+              title="Previous keyframe"
+              aria-label="Previous keyframe"
+            >
+              ◀◆
+            </button>
+            <button
+              className={styles.iconBtn}
+              disabled={nextTime === undefined}
+              onClick={() => nextTime !== undefined && props.onSeek(nextTime)}
+              title="Next keyframe"
+              aria-label="Next keyframe"
+            >
+              ◆▶
+            </button>
+            <span className={styles.time}>
+              {playhead.toFixed(2)} / {duration.toFixed(2)}s
+            </span>
+            <input
+              className={styles.scrub}
+              style={{ flex: 1 }}
+              type="range"
+              min={0}
+              max={span}
+              step={0.01}
+              value={Math.min(playhead, span)}
+              onChange={(e) => props.onSeek(Number(e.target.value))}
+              aria-label="Timeline scrubber"
+            />
+          </>
+        ) : null}
+      </div>
+    );
+  }
+
+  const objects = buildGroups(tracks);
 
   const toggleGroup = (id: string) =>
     setCollapsed((c) => {
@@ -283,7 +355,30 @@ export function Timeline(props: TimelineProps) {
   };
 
   return (
-    <div className={styles.timeline}>
+    <div className={styles.timeline} style={height !== null ? { height: clampHeight(height) } : undefined}>
+      <div
+        className={styles.resizeHandle}
+        title="Drag to resize"
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          resize.current = { startY: e.clientY, startHeight: e.currentTarget.parentElement!.offsetHeight };
+        }}
+        onPointerMove={(e) => {
+          const r = resize.current;
+          if (!r) return;
+          setHeight(clampHeight(r.startHeight + (r.startY - e.clientY)));
+        }}
+        onPointerUp={() => {
+          resize.current = null;
+          setHeight((h) => {
+            if (h !== null) saveHeight(h);
+            return h;
+          });
+        }}
+        onPointerCancel={() => {
+          resize.current = null;
+        }}
+      />
       <div className={styles.transport}>
         <button className={styles.iconBtn} onClick={props.onPlayPause} title={playing ? "Pause" : "Play"} aria-label={playing ? "Pause" : "Play"}>
           {playing ? "⏸" : "▶"}

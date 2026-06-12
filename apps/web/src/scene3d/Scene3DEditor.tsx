@@ -73,7 +73,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   // Animation timeline: playhead + transport. The playhead is fed to SceneView as a
   // controlled animationTime while previewing (playing or scrubbed off zero), so the
   // viewport mirrors the timeline; at rest the object shows its static pose for editing.
-  const [timelineOpen, setTimelineOpen] = useState(false);
+  const [timelineOpen, setTimelineOpen] = useState(loadTimelineOpen);
   const [playhead, setPlayhead] = useState(0);
   const [playing, setPlaying] = useState(false);
   // True while the transform gizmo is being dragged — suspends the animation driver
@@ -625,6 +625,11 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   useEffect(() => {
     saveInspectorCollapsed(inspectorCollapsed);
   }, [inspectorCollapsed]);
+
+  // Persist whether the timeline panel is open (editor-wide, like the inspector).
+  useEffect(() => {
+    saveTimelineOpen(timelineOpen);
+  }, [timelineOpen]);
 
   const selectedNode = useMemo(() => (scene && primaryId ? findNode(scene.nodes, primaryId) : null), [scene, primaryId]);
   // The visible outliner rows: a depth-tagged walk that stops descending into
@@ -1560,6 +1565,26 @@ function saveGizmoPrefs(prefs: GizmoPrefs): void {
     localStorage.setItem(GIZMO_PREFS_KEY, JSON.stringify(prefs));
   } catch {
     // localStorage unavailable — preferences just won't persist.
+  }
+}
+
+// Editor-wide "timeline panel open" preference (the collapsed state is a slim
+// transport bar, so closed is still useful — but the choice should stick).
+const TIMELINE_OPEN_KEY = "s3d:timelineOpen";
+
+function loadTimelineOpen(): boolean {
+  try {
+    return localStorage.getItem(TIMELINE_OPEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveTimelineOpen(value: boolean): void {
+  try {
+    localStorage.setItem(TIMELINE_OPEN_KEY, value ? "1" : "0");
+  } catch {
+    // localStorage unavailable — preference just won't persist.
   }
 }
 
