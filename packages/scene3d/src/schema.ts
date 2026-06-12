@@ -327,6 +327,49 @@ export function sampleTrack(track: AnimationTrack, time: number): number | undef
   return last.value;
 }
 
+// --- Track editing (pure; used by the editor timeline + future agent edits) ---
+
+/** Insert or replace a keyframe at `time` on the (targetId, property) track,
+ *  creating the track/animation as needed. Keeps keyframes sorted and grows
+ *  duration to cover the latest key. */
+export function upsertAnimationKeyframe(
+  animation: Animation | undefined,
+  targetId: string,
+  property: AnimatableProperty,
+  time: number,
+  value: number,
+  easing?: Easing
+): Animation {
+  const tracks = animation ? animation.tracks.map((t) => ({ ...t, keyframes: [...t.keyframes] })) : [];
+  const keyframe: Keyframe = { time, value, easing };
+  const index = tracks.findIndex((t) => t.targetId === targetId && t.property === property);
+  if (index === -1) {
+    tracks.push({ id: `${targetId}.${property}`, targetId, property, keyframes: [keyframe] });
+  } else {
+    const kfs = tracks[index].keyframes.filter((k) => Math.abs(k.time - time) > 1e-4);
+    kfs.push(keyframe);
+    kfs.sort((a, b) => a.time - b.time);
+    tracks[index].keyframes = kfs;
+  }
+  const latest = tracks.reduce((max, t) => Math.max(max, t.keyframes[t.keyframes.length - 1]?.time ?? 0), 0);
+  return { duration: Math.max(animation?.duration ?? 0, latest), loop: animation?.loop ?? true, tracks };
+}
+
+/** Remove a whole track. Returns undefined when no tracks remain. */
+export function removeAnimationTrack(animation: Animation, trackId: string): Animation | undefined {
+  const tracks = animation.tracks.filter((t) => t.id !== trackId);
+  return tracks.length > 0 ? { ...animation, tracks } : undefined;
+}
+
+/** Remove the keyframe at `time` from a track; drops the track (and animation)
+ *  when it empties. Returns undefined when nothing animatable remains. */
+export function removeAnimationKeyframe(animation: Animation, trackId: string, time: number): Animation | undefined {
+  const tracks = animation.tracks
+    .map((t) => (t.id === trackId ? { ...t, keyframes: t.keyframes.filter((k) => Math.abs(k.time - time) > 1e-4) } : t))
+    .filter((t) => t.keyframes.length > 0);
+  return tracks.length > 0 ? { ...animation, tracks } : undefined;
+}
+
 /** Total timeline length: explicit duration or the latest keyframe time. */
 export function animationDuration(animation?: Animation): number {
   if (!animation) return 0;

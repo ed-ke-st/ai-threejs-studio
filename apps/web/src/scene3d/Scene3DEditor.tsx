@@ -10,11 +10,12 @@ import { Canvas, useThree } from "@react-three/fiber";
 import { ContactShadows, OrbitControls, TransformControls } from "@react-three/drei";
 import type { Object3D } from "three";
 import { SceneView } from "@ai-threejs-studio/scene3d/react";
-import { autoFixScene, findNode, flattenNodes, getActiveCamera, getCameras, lintScene, normalizeTransform, updateNode, type Camera, type LintIssue, type Scene3D, type SceneNode } from "@ai-threejs-studio/scene3d";
+import { animationDuration, autoFixScene, findNode, flattenNodes, getActiveCamera, getCameras, lintScene, normalizeTransform, removeAnimationKeyframe, removeAnimationTrack, updateNode, upsertAnimationKeyframe, type AnimatableProperty, type Camera, type LintIssue, type Scene3D, type SceneNode, type Transform } from "@ai-threejs-studio/scene3d";
 import { Inspector, MultiInspector } from "./Inspector";
 import { ComposerControls } from "./ComposerControls";
 import { AddObjectMenu } from "./AddObjectMenu";
 import { CameraMenu } from "./CameraMenu";
+import { Timeline } from "./Timeline";
 import { createNodeFromSpec, type AddSpec } from "./sceneFactory";
 import { composePrompt } from "./promptComposer";
 import { MoveIcon, RedoIcon, RotateIcon, ScaleIcon, TrashIcon, UndoIcon } from "../ui/icons";
@@ -54,6 +55,18 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   // runtime sees) instead of the free-orbit editing camera.
   const [lookThrough, setLookThrough] = useState(false);
   const orbitRef = useRef<{ object: { position: { x: number; y: number; z: number } }; target: { x: number; y: number; z: number } } | null>(null);
+  // Animation timeline: playhead + transport. The playhead is fed to SceneView as a
+  // controlled animationTime while previewing (playing or scrubbed off zero), so the
+  // viewport mirrors the timeline; at rest the object shows its static pose for editing.
+  const [timelineOpen, setTimelineOpen] = useState(false);
+  const [playhead, setPlayhead] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  // Refs so the (stable) gizmo-commit handler can read live transport state for auto-key.
+  const playheadRef = useRef(0);
+  const playingRef = useRef(false);
+  // The live THREE scene root, captured from inside the Canvas, so keying can read
+  // the exact pose currently shown (static or animated) for the selected node.
+  const sceneRootRef = useRef<Object3D | null>(null);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("compose");
@@ -80,6 +93,40 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   useEffect(() => {
     sceneRef.current = scene;
   }, [scene]);
+
+  useEffect(() => {
+    playheadRef.current = playhead;
+  }, [playhead]);
+  useEffect(() => {
+    playingRef.current = playing;
+  }, [playing]);
+
+  // Drive the playhead while playing (rAF, off the React render path until it
+  // setStates each frame). Loops or stops at the end based on the animation.
+  useEffect(() => {
+    if (!playing) return;
+    let raf = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      const dt = (now - last) / 1000;
+      last = now;
+      const animation = sceneRef.current?.animation;
+      const duration = animationDuration(animation);
+      setPlayhead((prev) => {
+        if (duration <= 0) return prev;
+        const next = prev + dt;
+        if (next < duration) return next;
+        if (animation?.loop === false) {
+          setPlaying(false);
+          return duration;
+        }
+        return next % duration;
+      });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing]);
 
   const syncHistoryFlags = useCallback(() => {
     setCanUndo(historyRef.current.undo.length > 0);
@@ -226,14 +273,33 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     [recordHistory, queueSave, primaryId]
   );
 
-  // Commit a transform from the viewport gizmo (one undo step per drag).
+  // (module helpers RootCapture + readChannel are defined at the bottom of the file)
+
+  // Commit a transform from the viewport gizmo (one undo step per drag). When
+  // previewing the timeline (playing or scrubbed off zero), channels that already
+  // have a track are auto-keyed at the playhead instead of moving the static pose —
+  // so posing the gizmo at different times builds the animation (Blender-style).
   const commitGizmo = useCallback(
     (position: [number, number, number], rotation: [number, number, number], scale: [number, number, number]) => {
       if (!primaryId) return;
-      applyEdit((prev) => ({
-        ...prev,
-        nodes: updateNode(prev.nodes, primaryId, (node) => ({ ...node, transform: { position, rotation, scale } }))
-      }));
+      const previewing = playingRef.current || playheadRef.current > 1e-3;
+      const time = Math.round(playheadRef.current * 1000) / 1000;
+      applyEdit((prev) => {
+        const next: Scene3D = { ...prev, nodes: updateNode(prev.nodes, primaryId, (node) => ({ ...node, transform: { position, rotation, scale } })) };
+        if (!previewing || !prev.animation) return next;
+        const channels: [AnimatableProperty, number][] = [
+          ["position.x", position[0]], ["position.y", position[1]], ["position.z", position[2]],
+          ["rotation.x", rotation[0]], ["rotation.y", rotation[1]], ["rotation.z", rotation[2]],
+          ["scale.x", scale[0]], ["scale.y", scale[1]], ["scale.z", scale[2]], ["scale", scale[0]]
+        ];
+        let animation = prev.animation;
+        for (const [property, value] of channels) {
+          if (animation.tracks.some((t) => t.targetId === primaryId && t.property === property)) {
+            animation = upsertAnimationKeyframe(animation, primaryId, property, time, value);
+          }
+        }
+        return { ...next, animation };
+      });
     },
     [applyEdit, primaryId]
   );
@@ -593,6 +659,45 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     });
   };
 
+  // --- Animation timeline ---
+  const duration = animationDuration(scene.animation);
+  // Feed SceneView a controlled time only while previewing; at rest the node shows
+  // its static pose so the gizmo/inspector edit the base transform normally.
+  const previewActive = playing || playhead > 1e-3;
+  const seek = (time: number) => {
+    setPlaying(false);
+    setPlayhead(Math.max(0, time));
+  };
+  const togglePlay = () => {
+    if (!playing && playhead >= duration) setPlayhead(0); // replay from start
+    setPlaying((v) => !v);
+  };
+  const toggleLoop = () =>
+    applyEdit((prev) => (prev.animation ? { ...prev, animation: { ...prev.animation, loop: prev.animation.loop === false } } : prev));
+  const setDuration = (value: number) =>
+    applyEdit((prev) => (prev.animation ? { ...prev, animation: { ...prev.animation, duration: value } } : { ...prev, animation: { duration: value, loop: true, tracks: [] } }));
+  const deleteTrack = (trackId: string) =>
+    applyEdit((prev) => (prev.animation ? { ...prev, animation: removeAnimationTrack(prev.animation, trackId) } : prev));
+  const deleteKeyframe = (trackId: string, time: number) =>
+    applyEdit((prev) => (prev.animation ? { ...prev, animation: removeAnimationKeyframe(prev.animation, trackId, time) } : prev));
+  // Insert keyframes for the given channels at the playhead, reading the live pose.
+  const keyChannels = (channels: AnimatableProperty[]) => {
+    const node = selectedNode;
+    if (!node) return;
+    const time = round(playhead);
+    const obj = sceneRootRef.current?.getObjectByName(node.id) ?? null;
+    const fallback = normalizeTransform(node.transform);
+    applyEdit((prev) => {
+      let animation = prev.animation;
+      for (const channel of channels) {
+        animation = upsertAnimationKeyframe(animation, node.id, channel, time, readChannel(obj, channel, fallback));
+      }
+      return { ...prev, animation };
+    });
+    setTimelineOpen(true);
+  };
+  const nodeName = (id: string) => findNode(scene.nodes, id)?.name ?? id;
+
   return (
     <div className={styles.shell}>
 
@@ -867,7 +972,9 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
               selectedIds={selectedIds}
               onSelect={(id) => selectNode(id, { additive: additiveRef.current }, visibleNodes)}
               renderActiveCamera={lookThrough}
+              animationTime={previewActive ? playhead : undefined}
             />
+            <RootCapture target={sceneRootRef} />
             <ContactShadows position={[0, 0.01, 0]} opacity={0.5} scale={20} blur={2.4} far={8} />
             <OrbitControls ref={orbitRef as never} makeDefault target={activeCamera.target ?? [0, 1, 0]} />
             <Gizmo
@@ -879,6 +986,26 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
               onCommit={commitGizmo}
             />
           </Canvas>
+
+          {isWide ? (
+          <Timeline
+            open={timelineOpen}
+            animation={scene.animation}
+            duration={duration}
+            playhead={playhead}
+            playing={playing}
+            selectedNode={selectedNode}
+            nodeName={nodeName}
+            onToggleOpen={() => setTimelineOpen((v) => !v)}
+            onPlayPause={togglePlay}
+            onSeek={seek}
+            onSetDuration={setDuration}
+            onToggleLoop={toggleLoop}
+            onKey={keyChannels}
+            onDeleteTrack={deleteTrack}
+            onDeleteKeyframe={deleteKeyframe}
+          />
+          ) : null}
         </main>
 
         <aside
@@ -946,6 +1073,34 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
       </div>
     </div>
   );
+}
+
+// Captures the live THREE scene root (from inside the Canvas) into a ref so the
+// timeline can read the pose currently shown for any node when keying.
+function RootCapture({ target }: { target: React.RefObject<Object3D | null> }) {
+  const root = useThree((state) => state.scene);
+  useEffect(() => {
+    target.current = root;
+  }, [root, target]);
+  return null;
+}
+
+// Reads a single animatable channel's value off the live Object3D (what the
+// viewport currently shows), falling back to the node's static transform.
+function readChannel(obj: Object3D | null, channel: AnimatableProperty, fallback: Transform): number {
+  switch (channel) {
+    case "position.x": return obj ? obj.position.x : fallback.position[0];
+    case "position.y": return obj ? obj.position.y : fallback.position[1];
+    case "position.z": return obj ? obj.position.z : fallback.position[2];
+    case "rotation.x": return obj ? obj.rotation.x : fallback.rotation[0];
+    case "rotation.y": return obj ? obj.rotation.y : fallback.rotation[1];
+    case "rotation.z": return obj ? obj.rotation.z : fallback.rotation[2];
+    case "scale.x": return obj ? obj.scale.x : fallback.scale[0];
+    case "scale.y": return obj ? obj.scale.y : fallback.scale[1];
+    case "scale.z": return obj ? obj.scale.z : fallback.scale[2];
+    case "scale": return obj ? obj.scale.x : fallback.scale[0];
+    default: return 0; // opacity / camera target — not keyed via the v1 buttons
+  }
 }
 
 type GizmoMode = "translate" | "rotate" | "scale";
