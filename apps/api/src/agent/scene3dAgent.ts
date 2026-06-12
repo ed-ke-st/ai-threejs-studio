@@ -311,6 +311,9 @@ function applyScenePatch(scene: Scene3D, patch: unknown): Scene3D | null {
       const p = raw.patch;
       if (typeof p.background === "string") result = { ...result, background: p.background };
       if (isRecord(p.camera)) result = { ...result, camera: { ...result.camera, ...(p.camera as Scene3D["camera"]) } };
+      if (Array.isArray(p.cameras)) result = { ...result, cameras: p.cameras as Scene3D["cameras"] };
+      if (typeof p.activeCameraId === "string") result = { ...result, activeCameraId: p.activeCameraId };
+      if (isRecord(p.animation)) result = { ...result, animation: p.animation as unknown as Scene3D["animation"] };
       if (isRecord(p.fog)) result = { ...result, fog: p.fog as Scene3D["fog"] };
       if (isRecord(p.metadata)) result = { ...result, metadata: { ...result.metadata, ...(p.metadata as Scene3D["metadata"]) } };
       changed = true;

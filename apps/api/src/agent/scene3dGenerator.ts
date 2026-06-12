@@ -257,7 +257,7 @@ export class NodeStreamParser {
 
 export const SCENE3D_SYSTEM_INSTRUCTION = [
   "You author a Scene3D JSON document for a React Three Fiber scene. The same JSON is rendered by a fixed interpreter AND edited by users in a visual editor, so it must be complete and structured.",
-  "Top-level shape: { metadata: { name, version: 1 }, background?: hexColor, fog?: { color, near, far }, camera?: { position:[x,y,z], target:[x,y,z], fov }, nodes: SceneNode[] }.",
+  "Top-level shape: { metadata: { name, version: 1 }, background?: hexColor, fog?: { color, near, far }, camera?: { position:[x,y,z], target:[x,y,z], fov }, cameras?: Camera[], activeCameraId?: string, animation?: Animation, nodes: SceneNode[] }.",
   "A SceneNode is one of:",
   "- mesh: { id, type:\"mesh\", name, visible?, transform?:{position,rotation,scale}, geometry:{ kind, args? }, material?:{...}, castShadow?, receiveShadow? }",
   "- group: { id, type:\"group\", name, transform?, children: SceneNode[] }",
@@ -274,6 +274,8 @@ export const SCENE3D_SYSTEM_INSTRUCTION = [
   "- Give EVERY node a clear human-readable name (e.g. \"Oak Chair\", \"Seat\", \"Front-left leg\") — names are shown in the editor outliner and used when the user asks to refine a specific object.",
   "- Build depth and contrast: a ground/floor plane, one clear focal subject, supporting elements, and varied materials so objects read distinctly.",
   "The camera is a TOP-LEVEL field, never a node. \"light\" is a STRING, never an object.",
+  "CAMERAS (optional): provide cameras:[{ id, name, type:\"perspective\"|\"orthographic\", position:[x,y,z], target:[x,y,z], fov?(perspective), zoom?(orthographic) }] plus activeCameraId to define one or more named viewpoints; the active one frames the runtime view. Use this only when the prompt asks for specific/multiple camera angles. A single camera scene can just use the top-level camera field.",
+  "ANIMATION (optional): provide animation:{ duration(seconds), loop?, tracks:[{ id, targetId, property, keyframes:[{ time, value, easing? }] }] }. targetId is a NODE id (or camera id). property is one of position.x/y/z, rotation.x/y/z (radians), scale.x/y/z, scale (uniform), opacity, or target.x/y/z (camera). Keyframe values are ABSOLUTE; the property is fully driven over the timeline. easing is linear|easeIn|easeOut|easeInOut. Example — spin a node: { duration:4, loop:true, tracks:[{ id:\"spin\", targetId:\"planet\", property:\"rotation.y\", keyframes:[{time:0,value:0},{time:4,value:6.283}] }] }. Add animation only when the prompt asks for motion/spinning/orbiting/bobbing/etc.",
   "Example: {\"metadata\":{\"name\":\"Demo\",\"version\":1},\"background\":\"#0b0f17\",\"camera\":{\"position\":[3,2,4],\"target\":[0,1,0],\"fov\":45},\"nodes\":[{\"id\":\"ground\",\"type\":\"mesh\",\"name\":\"Ground\",\"geometry\":{\"kind\":\"box\",\"args\":[20,0.2,20]},\"transform\":{\"position\":[0,-0.1,0]},\"material\":{\"color\":\"#161d2b\",\"roughness\":0.9}},{\"id\":\"key\",\"type\":\"light\",\"name\":\"Key\",\"light\":\"directional\",\"color\":\"#fff1dc\",\"intensity\":2.5,\"transform\":{\"position\":[4,6,3]}}]}",
   "Use only procedural geometry, colours, and lights. No remote URLs, no textures, no external assets."
 ].join(" ");
@@ -297,7 +299,7 @@ export const SCENE3D_REFINE_DIFF_PREAMBLE = [
   '- { "op": "update", "id": string, "node": SceneNode } — replace the existing node that has this id with the COMPLETE updated node (same id).',
   '- { "op": "add", "parentId": string | null, "node": SceneNode } — add a new node; parentId is a group id to nest under, or null for the scene root.',
   '- { "op": "remove", "id": string } — delete the node with this id (and its children if it is a group).',
-  '- { "op": "scene", "patch": { background?, fog?, camera?, metadata? } } — change scene-level fields only.',
+  '- { "op": "scene", "patch": { background?, fog?, camera?, cameras?, activeCameraId?, animation?, metadata? } } — change scene-level fields only (incl. cameras + keyframe animation).',
   "Include ONLY the operations needed for the request. Touch the fewest nodes possible; never restate unchanged nodes.",
   'Match objects the user names (e.g. "the crystal") to the existing node by name/role and update THAT id in place.',
   "Preserve every id and name unless the request is specifically about renaming. New nodes need unique ids and human-readable names.",
