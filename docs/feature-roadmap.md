@@ -142,10 +142,10 @@ presets later.
 
 ## Recommended sequencing
 
-1. **#1 Bloom + #9 settings panel + #2 environment** — one PR, shared home, biggest
-   visible win. **← in progress**
-2. **#4 render PNG + #5 video** — share the `preserveDrawingBuffer` prereq.
-3. **#3 GLB export** — interop.
+1. ~~**#1 Bloom + #9 settings panel + #2 environment**~~ — DONE (World menu).
+2. ~~**#4 render PNG + #5 video**~~ — DONE (Capture menu; offscreen CaptureStage +
+   useSceneCapture render a clean active-camera view to PNG / WebM).
+3. **#3 GLB export** — interop. **← next**
 4. **#11 presets + #10 group/ungroup** — cheap ergonomics, interleave anytime.
 5. **#6 image-to-scene → #7 variations → #8 chat history** — AI tier, most
    product-defining, most effort.

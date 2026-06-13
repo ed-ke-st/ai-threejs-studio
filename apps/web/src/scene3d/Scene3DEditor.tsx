@@ -16,6 +16,8 @@ import { ComposerControls } from "./ComposerControls";
 import { AddObjectMenu } from "./AddObjectMenu";
 import { CameraMenu } from "./CameraMenu";
 import { SceneSettingsMenu } from "./SceneSettingsMenu";
+import { ExportMenu } from "./ExportMenu";
+import { useSceneCapture } from "./useSceneCapture";
 import { Timeline } from "./Timeline";
 import { createNodeFromSpec, type AddSpec } from "./sceneFactory";
 import { composePrompt } from "./promptComposer";
@@ -713,12 +715,21 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     [applyEdit]
   );
 
+  // Offscreen capture of the active-camera view → PNG still / WebM animation.
+  // Called before the `if (!scene)` guard (rules of hooks); the hook tolerates a
+  // null scene and just renders no capture stage until one is loaded.
+  const captureBase = (scene?.metadata.name || "scene").trim().replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "") || "scene";
+  const capture = useSceneCapture(scene, playhead, captureBase);
+
   if (!scene) {
     return <div className={styles.loading}>Loading scene…</div>;
   }
 
   const cameras = getCameras(scene);
   const activeCamera = getActiveCamera(scene);
+  const runCapture = (action: Promise<void>) => {
+    void action.catch((error) => logError("Export failed", error instanceof Error ? error.message : String(error)));
+  };
 
   // Scene-level look (background / fog / environment / post-processing). One
   // shallow patch through applyEdit so it records history + autosaves like any
@@ -1163,6 +1174,12 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
               onKeyLens={keyCameraLens}
               playhead={playhead}
             />
+            <ExportMenu
+              hasAnimation={(scene.animation?.tracks.length ?? 0) > 0}
+              busy={capture.busy}
+              onRenderImage={(res) => runCapture(capture.renderImage(res))}
+              onExportVideo={(res, fps) => runCapture(capture.exportVideo(res, fps))}
+            />
 
           </div>
 
@@ -1207,6 +1224,15 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
               onDraggingChange={setGizmoDragging}
             />
           </Canvas>
+
+          {/* Offscreen capture surface + progress overlay for PNG/WebM export. */}
+          {capture.stage}
+          {capture.status ? (
+            <div className={styles.captureOverlay} role="status" aria-live="polite">
+              <span className={styles.pulseDot} />
+              {capture.status}
+            </div>
+          ) : null}
 
           <Timeline
             open={timelineOpen}

@@ -431,6 +431,27 @@
   min-height: 0;
 }
 
+/* Capture (PNG/WebM export) progress chip, centered over the viewport. */
+.captureOverlay {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(10, 15, 23, 0.92);
+  border: 1px solid #2a3442;
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
 .mobileDock {
   display: none;
 }
