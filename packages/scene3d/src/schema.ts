@@ -177,11 +177,38 @@ export interface Animation {
   tracks: AnimationTrack[];
 }
 
+// Image-based lighting / reflections. `preset` is one of drei's built-in HDRIs
+// (studio, sunset, city, …); `background` renders it as the scene backdrop.
+export type EnvironmentPreset =
+  | "apartment" | "city" | "dawn" | "forest" | "lobby" | "night" | "park" | "studio" | "sunset" | "warehouse";
+
+export const ENVIRONMENT_PRESETS: EnvironmentPreset[] = [
+  "apartment", "city", "dawn", "forest", "lobby", "night", "park", "studio", "sunset", "warehouse"
+];
+
+export interface EnvironmentSettings {
+  preset?: EnvironmentPreset;
+  intensity?: number; // IBL strength (default 1)
+  background?: boolean; // also show the HDRI as the scene backdrop
+  blur?: number; // 0..1 backdrop blur when background is on
+}
+
+// Screen-space post-processing applied after the main render. Each effect is
+// optional; omit `postprocessing` entirely for a raw render. Bloom is the
+// headline effect — it makes emissive materials and glow lights actually glow.
+export interface PostProcessing {
+  bloom?: { intensity?: number; luminanceThreshold?: number; radius?: number };
+  vignette?: { darkness?: number };
+  ssao?: boolean; // ambient-occlusion contact shadows (perf-heavy)
+  dof?: { focusDistance?: number; focalLength?: number; bokehScale?: number };
+}
+
 export interface Scene3D {
   metadata: { name?: string; version: 1 };
   background?: Color;
   fog?: { color: Color; near: number; far: number };
-  environment?: { preset?: string; intensity?: number };
+  environment?: EnvironmentSettings;
+  postprocessing?: PostProcessing;
   // Legacy single camera (kept for back-compat); superseded by `cameras`.
   camera?: { position?: Vec3; target?: Vec3; fov?: number };
   cameras?: Camera[];

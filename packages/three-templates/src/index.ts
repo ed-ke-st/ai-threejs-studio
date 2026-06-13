@@ -228,7 +228,9 @@ const baseFiles: TemplateFile[] = [
   "dependencies": {
     "@react-three/drei": "^10.1.2",
     "@react-three/fiber": "^9.1.2",
+    "@react-three/postprocessing": "^3.0.4",
     "@vitejs/plugin-react": "^4.5.0",
+    "postprocessing": "^6.39.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "three": "^0.177.0",

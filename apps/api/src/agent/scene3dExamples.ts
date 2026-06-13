@@ -74,6 +74,8 @@ const heroCrystal: Scene3D = {
   metadata: { name: "Glowing crystal on a pedestal", version: 1 },
   background: "#0b0f17",
   fog: { color: "#0b0f17", near: 6, far: 22 },
+  environment: { preset: "night", intensity: 0.6 },
+  postprocessing: { bloom: { intensity: 1.2, luminanceThreshold: 0.5, radius: 0.8 }, vignette: { darkness: 0.5 } },
   camera: { position: [3.4, 2.6, 4.4], target: [0, 1.1, 0], fov: 42 },
   nodes: [
     { id: "ground", type: "mesh", name: "Ground", geometry: { kind: "box", args: [30, 0.2, 30] }, transform: { position: [0, -0.1, 0] }, material: { color: "#10151f", roughness: 0.95, metalness: 0 }, receiveShadow: true, castShadow: false },

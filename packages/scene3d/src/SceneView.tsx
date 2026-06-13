@@ -5,10 +5,11 @@
 // editor preview, the shared static viewer, and (via the same JSON) on-demand
 // code export. Nothing here is bespoke per scene — richness comes from the data.
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import * as THREE from "three";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Center, Clone, Edges, Environment, Html, OrthographicCamera, PerspectiveCamera, useGLTF } from "@react-three/drei";
+import { Bloom, DepthOfField, EffectComposer, SSAO, Vignette } from "@react-three/postprocessing";
 import type {
   AnimatableProperty,
   Animation,
@@ -18,6 +19,7 @@ import type {
   Material,
   MeshNode,
   ModelNode,
+  PostProcessing,
   Scene3D,
   SceneNode,
   TextureSpec
@@ -49,7 +51,12 @@ export function SceneView({ scene, selectedId, selectedIds, onSelect, animationT
       {scene.background ? <color attach="background" args={[scene.background]} /> : null}
       {scene.fog ? <fog attach="fog" args={[scene.fog.color, scene.fog.near, scene.fog.far]} /> : null}
       {scene.environment?.preset ? (
-        <Environment preset={scene.environment.preset as never} environmentIntensity={scene.environment.intensity ?? 1} />
+        <Environment
+          preset={scene.environment.preset as never}
+          environmentIntensity={scene.environment.intensity ?? 1}
+          background={scene.environment.background ? true : undefined}
+          backgroundBlurriness={scene.environment.background ? scene.environment.blur ?? 0 : undefined}
+        />
       ) : null}
       {scene.animation && scene.animation.tracks.length > 0 && !suppressAnimation ? (
         <AnimationDriver animation={scene.animation} time={animationTime} camera={renderActiveCamera ? getActiveCamera(scene) : undefined} />
@@ -57,8 +64,36 @@ export function SceneView({ scene, selectedId, selectedIds, onSelect, animationT
       {scene.nodes.map((node) => (
         <NodeView key={node.id} node={node} selectedIds={ids} onSelect={onSelect} />
       ))}
+      <PostFx postprocessing={scene.postprocessing} />
     </>
   );
+}
+
+// Screen-space post-processing. Mounted only when at least one effect is
+// configured (an empty EffectComposer still costs an extra render pass). Bloom
+// uses MipmapBlur for a soft, modern look; thresholds are tuned for the emissive-
+// heavy scenes the generator favours.
+function PostFx({ postprocessing }: { postprocessing?: PostProcessing }) {
+  if (!postprocessing) return null;
+  const { bloom, vignette, ssao, dof } = postprocessing;
+  if (!bloom && !vignette && !ssao && !dof) return null;
+  // EffectComposer types its children as JSX.Element[] (not ReactNode), so build a
+  // filtered array of only the active effects rather than inlining conditionals —
+  // null/false/fragment children break its ref wiring and its types.
+  const effects: ReactElement[] = [];
+  // SSAO reads the normal pass; keep it first so later effects composite over it.
+  if (ssao) effects.push(<SSAO key="ssao" intensity={20} radius={0.1} luminanceInfluence={0.5} />);
+  if (bloom) {
+    effects.push(
+      <Bloom key="bloom" mipmapBlur intensity={bloom.intensity ?? 1} luminanceThreshold={bloom.luminanceThreshold ?? 0.6} radius={bloom.radius ?? 0.7} />
+    );
+  }
+  if (dof) {
+    effects.push(<DepthOfField key="dof" focusDistance={dof.focusDistance ?? 0.02} focalLength={dof.focalLength ?? 0.05} bokehScale={dof.bokehScale ?? 2} />);
+  }
+  if (vignette) effects.push(<Vignette key="vignette" darkness={vignette.darkness ?? 0.5} eskil={false} />);
+
+  return <EffectComposer enableNormalPass={Boolean(ssao)}>{effects}</EffectComposer>;
 }
 
 // Renders the active camera as the R3F default camera. The consumer's OrbitControls

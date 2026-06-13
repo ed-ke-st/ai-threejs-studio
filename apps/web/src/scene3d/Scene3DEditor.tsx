@@ -15,6 +15,7 @@ import { CameraInspector, Inspector, MultiInspector } from "./Inspector";
 import { ComposerControls } from "./ComposerControls";
 import { AddObjectMenu } from "./AddObjectMenu";
 import { CameraMenu } from "./CameraMenu";
+import { SceneSettingsMenu } from "./SceneSettingsMenu";
 import { Timeline } from "./Timeline";
 import { createNodeFromSpec, type AddSpec } from "./sceneFactory";
 import { composePrompt } from "./promptComposer";
@@ -719,6 +720,11 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   const cameras = getCameras(scene);
   const activeCamera = getActiveCamera(scene);
 
+  // Scene-level look (background / fog / environment / post-processing). One
+  // shallow patch through applyEdit so it records history + autosaves like any
+  // other edit; the change flows to preview/share/export via SceneView.
+  const patchScene = (patch: Partial<Scene3D>) => applyEdit((prev) => ({ ...prev, ...patch }));
+
   // Camera CRUD — all routed through applyEdit so they record history + autosave.
   const round = (n: number) => Math.round(n * 1000) / 1000;
   const selectCamera = (id: string) => applyEdit((prev) => ({ ...prev, activeCameraId: id }));
@@ -1135,6 +1141,13 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
               </div>
             ) : null}
                                                       <AddObjectMenu onAdd={addObject} />
+            <SceneSettingsMenu
+              background={scene.background}
+              fog={scene.fog}
+              environment={scene.environment}
+              postprocessing={scene.postprocessing}
+              onPatch={patchScene}
+            />
             <CameraMenu
               cameras={cameras}
               activeCameraId={activeCamera.id}
@@ -1195,7 +1208,6 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
             />
           </Canvas>
 
-          {isWide ? (
           <Timeline
             open={timelineOpen}
             animation={scene.animation}
@@ -1223,7 +1235,6 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
               } else setSelectedIds([id]);
             }}
           />
-          ) : null}
         </main>
 
         <aside

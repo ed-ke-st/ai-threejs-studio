@@ -7,6 +7,7 @@ import {
   ANIMATABLE_PROPERTIES,
   CAMERA_TYPES,
   EASINGS,
+  ENVIRONMENT_PRESETS,
   GEOMETRY_KINDS,
   TEXTURE_PATTERNS,
   normalizeTransform,
@@ -16,11 +17,14 @@ import {
   type Camera,
   type CameraType,
   type Easing,
+  type EnvironmentPreset,
+  type EnvironmentSettings,
   type Geometry,
   type GeometryKind,
   type Keyframe,
   type LightKind,
   type Material,
+  type PostProcessing,
   type Scene3D,
   type SceneNode,
   type TextureSpec,
@@ -178,9 +182,8 @@ export function validateScene3D(input: unknown): Scene3DValidationResult {
     metadata: { name: isRecord(root.metadata) && typeof root.metadata.name === "string" ? root.metadata.name : undefined, version: 1 },
     background: asColor(root.background),
     fog: normalizeFog(root.fog),
-    environment: isRecord(root.environment)
-      ? { preset: typeof root.environment.preset === "string" ? root.environment.preset : undefined, intensity: asNumber(root.environment.intensity) }
-      : undefined,
+    environment: normalizeEnvironment(root.environment),
+    postprocessing: normalizePostProcessing(root.postprocessing),
     camera: normalizeCamera(root.camera) ?? capturedCamera,
     cameras: cameras.length > 0 ? cameras : undefined,
     activeCameraId,
@@ -260,6 +263,44 @@ function normalizeFog(raw: unknown): Scene3D["fog"] {
   const far = asNumber(raw.far);
   if (!color || typeof near !== "number" || typeof far !== "number") return undefined;
   return { color, near, far };
+}
+
+function normalizeEnvironment(raw: unknown): EnvironmentSettings | undefined {
+  if (!isRecord(raw)) return undefined;
+  const preset = ENVIRONMENT_PRESETS.includes(raw.preset as EnvironmentPreset) ? (raw.preset as EnvironmentPreset) : undefined;
+  const env: EnvironmentSettings = {
+    preset,
+    intensity: asNumber(raw.intensity),
+    background: typeof raw.background === "boolean" ? raw.background : undefined,
+    blur: clamp01(asNumber(raw.blur))
+  };
+  // Nothing usable without a preset.
+  return env.preset ? env : undefined;
+}
+
+function normalizePostProcessing(raw: unknown): PostProcessing | undefined {
+  if (!isRecord(raw)) return undefined;
+  const result: PostProcessing = {};
+  if (isRecord(raw.bloom)) {
+    result.bloom = {
+      intensity: asNumber(raw.bloom.intensity),
+      luminanceThreshold: clamp01(asNumber(raw.bloom.luminanceThreshold)),
+      radius: clamp01(asNumber(raw.bloom.radius))
+    };
+  }
+  if (isRecord(raw.vignette)) {
+    result.vignette = { darkness: clamp01(asNumber(raw.vignette.darkness)) };
+  }
+  if (raw.ssao === true) result.ssao = true;
+  if (isRecord(raw.dof)) {
+    result.dof = {
+      focusDistance: asNumber(raw.dof.focusDistance),
+      focalLength: asNumber(raw.dof.focalLength),
+      bokehScale: asNumber(raw.dof.bokehScale)
+    };
+  }
+  // Drop an all-empty object so `postprocessing` stays undefined unless used.
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 function normalizeCamera(raw: unknown): Scene3D["camera"] {
