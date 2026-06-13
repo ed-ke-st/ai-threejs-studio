@@ -5,6 +5,10 @@ import { config as loadEnv } from "dotenv";
 export const repoRoot = findRepoRoot(path.resolve(new URL("../../..", import.meta.url).pathname));
 
 loadEnv({ path: path.join(repoRoot, ".env") });
+// Local overrides layer on top (standard dotenv precedence): `.env.local` is
+// gitignored, so a developer can flip settings — e.g. blank the Supabase vars to
+// run single-tenant without a login wall — without touching the shared `.env`.
+loadEnv({ path: path.join(repoRoot, ".env.local"), override: true });
 
 // Accounts/auth. When both a Supabase URL and a Postgres connection string are
 // present the API runs multi-tenant: it verifies Supabase JWTs and stores project
