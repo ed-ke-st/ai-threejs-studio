@@ -33,6 +33,15 @@
   color: var(--c-text);
 }
 
+/* Text beside the trigger icon (e.g. the camera menu's view name). Hidden on
+   phones so the gizmo bar's scrollable row stays short — the icon + title
+   attribute carry the meaning there. */
+@media (max-width: 640px) {
+  .addLabel {
+    display: none;
+  }
+}
+
 .popover {
   position: absolute;
   top: calc(100% + 4px);

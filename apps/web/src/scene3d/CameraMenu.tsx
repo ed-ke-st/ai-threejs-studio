@@ -99,7 +99,8 @@ export function CameraMenu({
         aria-label="Cameras"
       >
         
-        {lookThrough ? <CameraIcon size={14} /> : <CameraOffIcon size={14} />} {lookThrough ? active?.name ?? "Camera" : "Default view"}
+        {lookThrough ? <CameraIcon size={14} /> : <CameraOffIcon size={14} />}
+        <span className={styles.addLabel}>{lookThrough ? active?.name ?? "Camera" : "Default view"}</span>
       </button>
       {open && coords
         ? createPortal(

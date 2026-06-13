@@ -550,9 +550,15 @@
     justify-content: space-between;
   }
 
+  /* One clean row: the toolbar flexes (its own spacer absorbs slack) and the
+     settings/sign-out buttons keep their natural size beside it. Inline in the
+     topbar it shouldn't paint its standalone strip background either. */
   .toolbar {
-    flex-wrap: wrap;
-    width: 88%;
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-wrap: nowrap;
+    background: transparent;
+    border-bottom: none;
   }
 
   .statusbar {
@@ -588,11 +594,11 @@
   }
 
   .surfaceToggle {
-    width: 80%;
+    flex: 0 0 auto;
   }
 
   .surfaceBtn {
-    flex: 1 1 0;
+    padding: 6px 10px;
   }
 
   .shareUrlRow,

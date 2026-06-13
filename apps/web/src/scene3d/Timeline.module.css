@@ -286,3 +286,63 @@
   padding: 10px 2px;
   font-size: 11px;
 }
+
+/* Tablet/mobile: the viewport above the panel tabs is short (≈44svh), so keep
+   the panel lean — the transport becomes one horizontally scrollable row (like
+   the gizmo bar) instead of wrapping into several rows over the canvas. */
+@media (max-width: 1180px) {
+  .timeline {
+    /* Never cover the gizmo bar pinned to the top of the (short) canvas. */
+    max-height: min(75%, calc(100% - 68px));
+  }
+  .transport {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .transport::-webkit-scrollbar {
+    display: none;
+  }
+  .transport > * {
+    flex-shrink: 0;
+  }
+  /* The "Key <node> @ t" hint is the widest, least essential element. */
+  .keyLabel {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .lane {
+    grid-template-columns: 104px 1fr 24px;
+  }
+  /* Keep the mini bar to: toggle, transport buttons, scrubber. */
+  .miniBar .time {
+    display: none;
+  }
+}
+
+/* Touch devices: bigger grab targets for the precision controls. */
+@media (pointer: coarse) {
+  .iconBtn {
+    width: 38px;
+    height: 36px;
+  }
+  .key {
+    width: 14px;
+    height: 14px;
+  }
+  .resizeHandle {
+    top: -8px;
+    height: 18px;
+  }
+  .deleteTrack {
+    padding: 8px 6px;
+  }
+  .caret {
+    padding: 4px 8px;
+  }
+  .track {
+    height: 24px;
+  }
+}
