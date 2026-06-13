@@ -19,9 +19,10 @@ export interface ExportMenuProps {
   busy: boolean;
   onRenderImage: (res: CaptureResolution) => void;
   onExportVideo: (res: CaptureResolution, fps: number) => void;
+  onExportModel: () => void;
 }
 
-export function ExportMenu({ hasAnimation, busy, onRenderImage, onExportVideo }: ExportMenuProps) {
+export function ExportMenu({ hasAnimation, busy, onRenderImage, onExportVideo, onExportModel }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
   const [resIndex, setResIndex] = useState(1); // default 1080p
@@ -122,6 +123,13 @@ export function ExportMenu({ hasAnimation, busy, onRenderImage, onExportVideo }:
                 {busy ? "Working…" : "↓ Export animation (WebM)"}
               </button>
               {!hasAnimation ? <div style={hintStyle}>No animation in this scene yet.</div> : null}
+
+              <div className={styles.divider} />
+              <div className={styles.section}>3D model</div>
+              <button className={styles.item} disabled={busy} onClick={onExportModel}>
+                {busy ? "Working…" : "↓ Export model (GLB)"}
+              </button>
+              <div style={hintStyle}>Geometry, materials &amp; lights at the current pose.</div>
             </div>,
             document.body
           )

@@ -1179,6 +1179,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
               busy={capture.busy}
               onRenderImage={(res) => runCapture(capture.renderImage(res))}
               onExportVideo={(res, fps) => runCapture(capture.exportVideo(res, fps))}
+              onExportModel={() => runCapture(capture.exportModel())}
             />
 
           </div>

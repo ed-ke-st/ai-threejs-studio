@@ -7,6 +7,8 @@
 // (JSX to mount) and `status` (progress text for an overlay), plus the triggers.
 
 import { useCallback, useRef, useState, type ReactNode } from "react";
+import type * as THREE from "three";
+import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { animationDuration, type Scene3D } from "@ai-threejs-studio/scene3d";
 import { CaptureStage } from "./CaptureStage";
 
@@ -35,11 +37,18 @@ interface VideoJob {
   fps: number;
   durationSec: number;
 }
-type Job = (PngJob | VideoJob) & { settle: (error?: Error) => void };
+interface GlbJob {
+  kind: "glb";
+  width: number;
+  height: number;
+}
+type Job = (PngJob | VideoJob | GlbJob) & { settle: (error?: Error) => void };
 
 // Frames take a moment to settle (async HDRI/textures); warm up before capturing.
 const PNG_WARMUP_MS = 700;
 const VIDEO_WARMUP_MS = 500;
+// Let async geometry/model assets construct before reading the graph for GLB.
+const GLB_WARMUP_MS = 600;
 
 export function useSceneCapture(scene: Scene3D | null, playhead: number, fileBase: string) {
   const [job, setJob] = useState<Job | null>(null);
@@ -55,9 +64,35 @@ export function useSceneCapture(scene: Scene3D | null, playhead: number, fileBas
     current.settle(error);
   }, []);
 
+  // GLB export reads the constructed scene graph (no rendering needed) and runs
+  // the glTF binary exporter. Skips the capture camera so the file carries only
+  // the scene's own nodes/lights. Animation is NOT baked yet — static pose export.
+  const onScene = useCallback(
+    (threeScene: THREE.Scene) => {
+      if (!job || job.kind !== "glb") return;
+      window.setTimeout(() => {
+        setStatus("Exporting model…");
+        try {
+          new GLTFExporter().parse(
+            threeScene,
+            (gltf) => {
+              triggerBlob(new Blob([gltf as ArrayBuffer], { type: "model/gltf-binary" }), `${fileBase}.glb`);
+              finish(job);
+            },
+            (error) => finish(job, new Error(error?.message ?? "glTF export failed.")),
+            { binary: true, onlyVisible: true }
+          );
+        } catch (error) {
+          finish(job, asError(error));
+        }
+      }, GLB_WARMUP_MS);
+    },
+    [job, fileBase, finish]
+  );
+
   const onReady = useCallback(
     (canvas: HTMLCanvasElement) => {
-      if (!job) return;
+      if (!job || job.kind === "glb") return;
 
       if (job.kind === "png") {
         setStatus("Rendering image…");
@@ -145,6 +180,19 @@ export function useSceneCapture(scene: Scene3D | null, playhead: number, fileBas
     [scene]
   );
 
+  const exportModel = useCallback(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        if (!scene) {
+          reject(new Error("No scene loaded."));
+          return;
+        }
+        // GLB needs the graph, not pixels — a tiny canvas keeps GPU cost minimal.
+        setJob({ kind: "glb", width: 64, height: 64, settle: (e) => (e ? reject(e) : resolve()) });
+      }),
+    [scene]
+  );
+
   const stage: ReactNode =
     job && scene ? (
       <CaptureStage
@@ -152,11 +200,13 @@ export function useSceneCapture(scene: Scene3D | null, playhead: number, fileBas
         width={job.width}
         height={job.height}
         animationTime={job.kind === "png" ? job.time : videoTime}
+        withCamera={job.kind !== "glb"}
         onReady={onReady}
+        onScene={job.kind === "glb" ? onScene : undefined}
       />
     ) : null;
 
-  return { renderImage, exportVideo, stage, status, busy: job !== null };
+  return { renderImage, exportVideo, exportModel, stage, status, busy: job !== null };
 }
 
 function pickVideoMime(): string | null {

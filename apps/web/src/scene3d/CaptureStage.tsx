@@ -8,7 +8,9 @@
 // once the GL context exists; the caller then warms up a few frames (for async
 // HDRI/textures) before capturing.
 
-import { Canvas } from "@react-three/fiber";
+import { useEffect } from "react";
+import * as THREE from "three";
+import { Canvas, useThree } from "@react-three/fiber";
 import { SceneView } from "@ai-threejs-studio/scene3d/react";
 import { DEFAULT_CAMERA, getActiveCamera, type Scene3D } from "@ai-threejs-studio/scene3d";
 
@@ -20,11 +22,16 @@ export interface CaptureStageProps {
   animationTime?: number;
   /** Let the animation play/loop on its own clock (video recording). */
   autoplay?: boolean;
-  /** Fires with the backing <canvas> once the GL context is created. */
-  onReady: (canvas: HTMLCanvasElement) => void;
+  /** Render the active camera as the default (PNG/WebM framing). GLB skips this so
+   *  the exported file carries only the scene's own nodes, not a capture camera. */
+  withCamera?: boolean;
+  /** Fires with the backing <canvas> once the GL context is created (PNG/WebM). */
+  onReady?: (canvas: HTMLCanvasElement) => void;
+  /** Fires with the live THREE scene graph once mounted (GLB export). */
+  onScene?: (scene: THREE.Scene) => void;
 }
 
-export function CaptureStage({ scene, width, height, animationTime, autoplay, onReady }: CaptureStageProps) {
+export function CaptureStage({ scene, width, height, animationTime, autoplay, withCamera = true, onReady, onScene }: CaptureStageProps) {
   const active = getActiveCamera(scene);
   return (
     <div aria-hidden style={{ position: "fixed", left: -100000, top: 0, width, height, pointerEvents: "none", opacity: 0 }}>
@@ -37,10 +44,20 @@ export function CaptureStage({ scene, width, height, animationTime, autoplay, on
         dpr={1}
         style={{ width, height }}
         camera={{ position: active.position ?? DEFAULT_CAMERA.position, fov: active.fov ?? DEFAULT_CAMERA.fov }}
-        onCreated={({ gl }) => onReady(gl.domElement)}
+        onCreated={({ gl }) => onReady?.(gl.domElement)}
       >
-        <SceneView scene={scene} renderActiveCamera animationTime={autoplay ? undefined : animationTime} />
+        <SceneView scene={scene} renderActiveCamera={withCamera} animationTime={autoplay ? undefined : animationTime} />
+        {onScene ? <SceneGrabber onScene={onScene} /> : null}
       </Canvas>
     </div>
   );
+}
+
+// Hands the live THREE scene graph back to the caller once mounted, for GLTFExport.
+function SceneGrabber({ onScene }: { onScene: (scene: THREE.Scene) => void }) {
+  const sceneObj = useThree((state) => state.scene);
+  useEffect(() => {
+    onScene(sceneObj);
+  }, [sceneObj, onScene]);
+  return null;
 }
