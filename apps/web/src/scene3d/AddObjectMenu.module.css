@@ -9,7 +9,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 4px;
+  min-height: 30px;
+  padding: 5px 8px;
   background: transparent;
   color: var(--c-text-muted);
   border: 1px solid var(--c-border);
@@ -19,6 +20,7 @@
   cursor: pointer;
   font-weight: 600;
   gap: 4px;
+  white-space: nowrap;
 }
 
 .add {
@@ -93,8 +95,9 @@
 
 @media (max-width: 640px) {
   .addBtn {
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
+    padding: 0;
     font-size: 18px;
   }
 

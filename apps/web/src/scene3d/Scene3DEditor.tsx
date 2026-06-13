@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { ContactShadows, OrbitControls, TransformControls } from "@react-three/drei";
-import type { Object3D } from "three";
+import { Euler, Matrix4, Quaternion, Vector3, type Object3D } from "three";
 import { SceneView } from "@ai-threejs-studio/scene3d/react";
 import { DEFAULT_CAMERA, animationDuration, autoFixScene, findNode, flattenNodes, getActiveCamera, getCameras, lintScene, moveAnimationKeyframe, normalizeTransform, removeAnimationKeyframe, removeAnimationTrack, sampleTrack, updateNode, upsertAnimationKeyframe, type AnimatableProperty, type Animation, type Camera, type LintIssue, type Scene3D, type SceneNode, type Transform } from "@ai-threejs-studio/scene3d";
 import { CameraInspector, Inspector, MultiInspector } from "./Inspector";
@@ -21,13 +21,42 @@ import { useSceneCapture } from "./useSceneCapture";
 import { Timeline } from "./Timeline";
 import { createNodeFromSpec, type AddSpec } from "./sceneFactory";
 import { composePrompt } from "./promptComposer";
-import { MoveIcon, RedoIcon, RotateIcon, ScaleIcon, TrashIcon, UndoIcon } from "../ui/icons";
+import { GroupIcon, MoveIcon, RedoIcon, RotateIcon, ScaleIcon, TrashIcon, UndoIcon, UngroupIcon } from "../ui/icons";
 import { authHeaders } from "../auth/supabaseClient";
 import { useProjectStore } from "../stores/projectStore";
 import styles from "./Scene3DEditor.module.css";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 type MobilePanel = "compose" | "outliner" | "inspector";
+type ReferenceImage = { dataUrl: string; name: string };
+type TurnStatus = "success" | "error" | "partial" | "cancelled";
+interface SceneVariation {
+  id: string;
+  label: string;
+  scene: Scene3D;
+  issues?: string[];
+  attempts?: number;
+  ok?: boolean;
+}
+interface VariationSet {
+  id: string;
+  prompt: string;
+  baseScene: Scene3D;
+  candidates: SceneVariation[];
+  previewId: string | null;
+}
+interface ComposerTurn {
+  id: string;
+  createdAt: string;
+  mode: "new" | "refine";
+  prompt: string;
+  hasReferenceImage: boolean;
+  selectedLabel?: string;
+  status: TurnStatus;
+  message?: string;
+  beforeScene: Scene3D;
+  afterScene?: Scene3D;
+}
 
 interface Scene3DEditorProps {
   projectId: string;
@@ -43,13 +72,18 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   const [allowFloating, setAllowFloating] = useState(() => loadAllowFloating(projectId));
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [prompt, setPrompt] = useState("");
+  const [referenceImage, setReferenceImage] = useState<ReferenceImage | null>(null);
   const [mode, setMode] = useState<"new" | "refine">("new");
+  const [variationsEnabled, setVariationsEnabled] = useState(false);
+  const [variationSet, setVariationSet] = useState<VariationSet | null>(null);
   const [styleId, setStyleId] = useState<string | null>(null);
   const [modifierIds, setModifierIds] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
   const [stage, setStage] = useState("");
   const [agentError, setAgentError] = useState<string | null>(null);
   const [resumePrompt, setResumePrompt] = useState<string | null>(null);
+  const [turnLog, setTurnLog] = useState<ComposerTurn[]>(() => loadTurnLog(projectId));
+  const [turnLogOpen, setTurnLogOpen] = useState(() => loadTurnLog(projectId).length > 0);
   // Progress-pill extras: which model is running (from the stream's meta event)
   // and a ticking elapsed-seconds counter, so long runs visibly make progress.
   const [genModel, setGenModel] = useState<string | null>(null);
@@ -195,6 +229,11 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   useEffect(() => {
     setScene(null);
     setSelectedIds([]);
+    setVariationSet(null);
+    setVariationsEnabled(false);
+    const turns = loadTurnLog(projectId);
+    setTurnLog(turns);
+    setTurnLogOpen(turns.length > 0);
     // History is kept in the per-project module store (getEditorHistory), so it
     // survives an editor remount (e.g. switching to the runtime preview and back).
     historyRef.current = getEditorHistory(projectId);
@@ -202,6 +241,10 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     syncHistoryFlags();
     void load();
   }, [projectId, load, syncHistoryFlags]);
+
+  useEffect(() => {
+    saveTurnLog(projectId, turnLog);
+  }, [projectId, turnLog]);
 
   // Keep the additive-modifier flag in sync for canvas selection.
   useEffect(() => {
@@ -255,6 +298,76 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     [queueSave, recordHistory]
   );
 
+  const appendTurn = useCallback((turn: Omit<ComposerTurn, "id">) => {
+    setTurnLog((current) => {
+      const next = [{ id: createTurnId(), ...turn }, ...current].slice(0, MAX_TURN_LOG);
+      return next;
+    });
+    setTurnLogOpen(true);
+  }, []);
+
+  const revertTurn = useCallback(
+    (turn: ComposerTurn) => {
+      const current = sceneRef.current;
+      if (current) recordHistory(current, true);
+      setScene(turn.beforeScene);
+      setSelectedIds([]);
+      void save(turn.beforeScene);
+      syncHistoryFlags();
+    },
+    [recordHistory, save, syncHistoryFlags]
+  );
+
+  const clearTurnLog = useCallback(() => {
+    setTurnLog([]);
+  }, []);
+
+  const previewVariation = useCallback(
+    (id: string) => {
+      if (!variationSet) return;
+      const candidate = variationSet.candidates.find((item) => item.id === id);
+      if (!candidate) return;
+      setScene(candidate.scene);
+      setSelectedIds([]);
+      setVariationSet({ ...variationSet, previewId: id });
+      setSaveState("idle");
+    },
+    [variationSet]
+  );
+
+  const discardVariations = useCallback(() => {
+    if (variationSet?.previewId) {
+      setScene(variationSet.baseScene);
+      setSelectedIds([]);
+      setSaveState("saved");
+    }
+    setVariationSet(null);
+  }, [variationSet]);
+
+  const useVariation = useCallback(
+    (id: string) => {
+      if (!variationSet) return;
+      const candidate = variationSet.candidates.find((item) => item.id === id);
+      if (!candidate) return;
+      recordHistory(variationSet.baseScene, true);
+      setScene(candidate.scene);
+      setSelectedIds([]);
+      setVariationSet(null);
+      void save(candidate.scene);
+      appendTurn({
+        createdAt: new Date().toISOString(),
+        mode: "new",
+        prompt: `${variationSet.prompt} (${candidate.label})`,
+        hasReferenceImage: Boolean(referenceImage),
+        status: "success",
+        message: `Applied ${candidate.label} from ${variationSet.candidates.length} generated options.`,
+        beforeScene: variationSet.baseScene,
+        afterScene: candidate.scene
+      });
+    },
+    [appendTurn, recordHistory, referenceImage, save, variationSet]
+  );
+
   // Commit an Inspector edit. While previewing the timeline the Inspector shows
   // the pose sampled at the playhead (see `inspectorNode`), so a transform edit
   // there is auto-keyed on channels that already have tracks — mirroring the
@@ -296,6 +409,21 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   // scene, so the texture travels with the scene JSON — it renders in the editor,
   // runtime preview, share link, and exported bundle with no serving needed.
   const uploadImage = useCallback((file: File) => fileToTextureDataUrl(file), []);
+
+  const pickReferenceImage = useCallback(async (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setAgentError("Reference image must be an image file.");
+      return;
+    }
+    try {
+      const dataUrl = await fileToTextureDataUrl(file, 768);
+      setReferenceImage({ dataUrl, name: file.name || "reference image" });
+      setAgentError(null);
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Reference image could not be loaded.");
+    }
+  }, []);
 
   // Insert a manually-added object (Add menu). If a group is selected, add it as
   // a child of that group (and expand it); otherwise add at the scene root.
@@ -420,22 +548,36 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   const generate = useCallback(
     async (override?: { prompt?: string; mode?: "new" | "refine" }) => {
       const activeMode = override?.mode ?? mode;
-      const rawPrompt = (override?.prompt ?? prompt).trim();
-      if (!rawPrompt) return;
+      const typedPrompt = (override?.prompt ?? prompt).trim();
+      if (!typedPrompt && !referenceImage) return;
+      const rawPrompt = typedPrompt || "Build an editable 3D scene based on the attached reference image.";
       // In refine mode the style/mood guidance would fight the "smallest edit"
       // instruction, so only attach it when building a new scene.
       const composed = activeMode === "refine" ? rawPrompt : composePrompt(rawPrompt, styleId, modifierIds);
+      const variationCount = activeMode === "new" && variationsEnabled && !override ? 3 : 1;
+      const generatingVariations = variationCount > 1;
       // Live build-up streams nodes in as the AI writes them — best for NEW scenes.
-      const streaming = liveBuild && activeMode === "new";
+      const streaming = liveBuild && activeMode === "new" && !generatingVariations;
+      const beforeScene = sceneRef.current ?? scene;
+      if (!beforeScene) return;
+      const turnBase = {
+        createdAt: new Date().toISOString(),
+        mode: activeMode,
+        prompt: rawPrompt,
+        hasReferenceImage: Boolean(referenceImage),
+        selectedLabel: activeMode === "refine" ? turnSelectedLabel(beforeScene, primaryId) : undefined,
+        beforeScene
+      };
       setGenerating(true);
+      setVariationSet(null);
       setAgentError(null);
       setResumePrompt(null);
       setGenModel(null);
-      setStage(activeMode === "refine" ? "Refining the scene" : "Designing the scene");
+      setStage(generatingVariations ? "Designing 3 options" : activeMode === "refine" ? "Refining the scene" : "Designing the scene");
       const abort = new AbortController();
       generateAbortRef.current = abort;
-      setSaveState("saving");
-      if (scene) recordHistory(scene, true); // standalone undo entry for the generate
+      setSaveState(generatingVariations ? "idle" : "saving");
+      if (!generatingVariations) recordHistory(beforeScene, true); // standalone undo entry for the generate
       if (streaming) {
         // Start from an empty canvas (keep current camera/background) so objects pop in.
         setScene((current) => ({ metadata: { name: "Building…", version: 1 }, background: current?.background, camera: current?.camera, nodes: [] }));
@@ -443,16 +585,18 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
 
       // On failure: if a streaming run already produced objects, keep + save them
       // and offer to continue, rather than discarding the partial work.
-      const failed = (detail: string) => {
+      const failed = (detail: string, status: Extract<TurnStatus, "error" | "cancelled"> = "error") => {
         logError(activeMode === "refine" ? "Refine failed" : "Generation failed", detail);
         const partial = streaming ? sceneRef.current : null;
         if (partial && partial.nodes.length > 0) {
           setAgentError(`${detail} — kept the ${partial.nodes.length} object(s) made so far; continue to add the rest, or keep editing.`);
           setResumePrompt(rawPrompt);
+          appendTurn({ ...turnBase, status: status === "cancelled" ? "cancelled" : "partial", message: detail, afterScene: partial });
           void save(partial);
         } else {
           setAgentError(detail);
           setSaveState("error");
+          appendTurn({ ...turnBase, status, message: detail });
         }
       };
 
@@ -465,7 +609,9 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
             prompt: composed,
             mode: activeMode,
             selectedObjectId: activeMode === "refine" ? primaryId ?? undefined : undefined,
-            stream: streaming
+            stream: streaming,
+            referenceImage: referenceImage?.dataUrl,
+            variationCount
           })
         });
 
@@ -480,7 +626,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
         }
 
         // Read the newline-delimited stream: progress | partial-node | result | error.
-        let result: { scene: Scene3D } | null = null;
+        let result: { scene?: Scene3D; variations?: SceneVariation[] } | null = null;
         let streamError: string | null = null;
         if (response.ok && response.body) {
           const reader = response.body.getReader();
@@ -496,7 +642,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
               buffer = buffer.slice(newline + 1);
               if (!line) continue;
               try {
-                const event = JSON.parse(line) as { type: string; stage?: string; node?: SceneNode; result?: { scene: Scene3D }; message?: string; model?: string };
+                const event = JSON.parse(line) as { type: string; stage?: string; node?: SceneNode; result?: { scene?: Scene3D; variations?: SceneVariation[] }; message?: string; model?: string };
                 if (event.type === "progress" && event.stage) setStage(event.stage);
                 else if (event.type === "meta" && event.model) setGenModel(event.model);
                 else if (event.type === "partial-node" && event.node && streaming) {
@@ -511,16 +657,27 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
           }
         }
 
-        if (result) {
+        if (result?.variations?.length) {
+          setScene(beforeScene);
+          setSaveState("saved");
+          setVariationSet({
+            id: createTurnId(),
+            prompt: rawPrompt,
+            baseScene: beforeScene,
+            candidates: result.variations,
+            previewId: null
+          });
+        } else if (result?.scene) {
           setScene(result.scene); // settle to the validated final scene
           setSaveState("saved");
+          appendTurn({ ...turnBase, status: "success", afterScene: result.scene });
         } else {
           failed(streamError || "Generation failed (no scene was returned).");
         }
       } catch (e) {
         // A user cancel surfaces as an AbortError — keep any partial work but
         // don't dress it up as a failure.
-        if (abort.signal.aborted) failed("Generation cancelled.");
+        if (abort.signal.aborted) failed("Generation cancelled.", "cancelled");
         else failed(e instanceof Error ? e.message : "Generation failed.");
       } finally {
         generateAbortRef.current = null;
@@ -529,7 +686,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
         void loadUsage(); // reflect the consumed (or refunded) generation
       }
     },
-    [projectId, prompt, mode, liveBuild, primaryId, styleId, modifierIds, scene, recordHistory, loadUsage, logError, save]
+    [projectId, prompt, referenceImage, mode, variationsEnabled, liveBuild, primaryId, styleId, modifierIds, scene, recordHistory, appendTurn, loadUsage, logError, save]
   );
 
   const deleteSelected = useCallback(() => {
@@ -560,10 +717,40 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     setSelectedIds(clones.map((c) => c.id));
   }, [selectedIds, recordHistory, queueSave]);
 
+  const groupSelection = useCallback(() => {
+    const prev = sceneRef.current;
+    if (!prev || selectedIds.length < 2) return;
+    const grouped = groupSelectedNodes(prev.nodes, new Set(selectedIds), collectIds(prev.nodes));
+    if (!grouped) return;
+    const next = { ...prev, nodes: grouped.nodes };
+    recordHistory(prev, true);
+    setScene(next);
+    queueSave(next);
+    setSelectedIds([grouped.groupId]);
+    setCollapsedIds((current) => {
+      const nextCollapsed = new Set(current);
+      nextCollapsed.delete(grouped.groupId);
+      return nextCollapsed;
+    });
+  }, [selectedIds, recordHistory, queueSave]);
+
+  const ungroupSelection = useCallback(() => {
+    const prev = sceneRef.current;
+    if (!prev || selectedIds.length === 0) return;
+    const ungrouped = ungroupSelectedNodes(prev.nodes, new Set(selectedIds));
+    if (!ungrouped) return;
+    const next = { ...prev, nodes: ungrouped.nodes };
+    recordHistory(prev, true);
+    setScene(next);
+    queueSave(next);
+    setSelectedIds(ungrouped.childIds);
+  }, [selectedIds, recordHistory, queueSave]);
+
   // Keyboard shortcuts: ⌘/Ctrl+Z undo, +Shift+Z redo, ⌘/Ctrl+A select all,
-  // ⌘/Ctrl+D duplicate, Delete/Backspace remove, Esc clear selection. Only
-  // text-entry fields (the prompt box) suppress these — slider/color/select
-  // inputs in the Inspector do not, so shortcuts work right after an edit.
+  // ⌘/Ctrl+D duplicate, ⌘/Ctrl+G group, +Shift+G ungroup, Delete/Backspace
+  // remove, Esc clear selection. Only text-entry fields (the prompt box)
+  // suppress these — slider/color/select inputs in the Inspector do not, so
+  // shortcuts work right after an edit.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (isTextEntry(event.target as HTMLElement | null)) return;
@@ -579,6 +766,10 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
       } else if (mod && key === "d") {
         event.preventDefault();
         duplicateSelected();
+      } else if (mod && key === "g") {
+        event.preventDefault();
+        if (event.shiftKey) ungroupSelection();
+        else groupSelection();
       } else if (event.key === "Delete" || event.key === "Backspace") {
         event.preventDefault();
         deleteSelected();
@@ -594,7 +785,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, duplicateSelected, deleteSelected]);
+  }, [undo, redo, duplicateSelected, groupSelection, ungroupSelection, deleteSelected]);
 
   const toggleModifier = useCallback((id: string) => {
     setModifierIds((current) => (current.includes(id) ? current.filter((m) => m !== id) : [...current, id]));
@@ -730,6 +921,8 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   const runCapture = (action: Promise<void>) => {
     void action.catch((error) => logError("Export failed", error instanceof Error ? error.message : String(error)));
   };
+  const canGroupSelection = selectedIds.length >= 2 && canGroupNodes(scene.nodes, new Set(selectedIds));
+  const canUngroupSelection = selectedNodes.some((node) => node.type === "group");
 
   // Scene-level look (background / fog / environment / post-processing). One
   // shallow patch through applyEdit so it records history + autosaves like any
@@ -911,18 +1104,29 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
             <div className={styles.mobilePanelBody}>
               <div className={styles.topbar}>
                 <div className={styles.modeToggle}>
-                  <button className={modeBtnClass(mode === "new")} onClick={() => setMode("new")} title="Build a brand-new scene from the prompt">
-                    New
-                  </button>
-                  <button className={modeBtnClass(mode === "refine")} onClick={() => setMode("refine")} title="Edit the current scene with a small change">
-                    Refine
-                  </button>
-                  {mode === "new" ? (
-                    <label className={styles.liveToggle} title="Watch objects appear as the AI writes them">
-                      <input type="checkbox" checked={liveBuild} onChange={(event) => setLiveBuild(event.target.checked)} />
-                      Live build
-                    </label>
-                  ) : null}
+                  <div className={styles.modeButtons}>
+                    <button className={modeBtnClass(mode === "new")} onClick={() => setMode("new")} title="Build a brand-new scene from the prompt">
+                      New
+                    </button>
+                    <button className={modeBtnClass(mode === "refine")} onClick={() => setMode("refine")} title="Edit the current scene with a small change">
+                      Refine
+                    </button>
+                  </div>
+                  <div className={styles.modeOptions}>
+                    {mode === "new" ? (
+                      <label className={styles.liveToggle} title="Watch objects appear as the AI writes them">
+                        <input type="checkbox" checked={liveBuild} onChange={(event) => setLiveBuild(event.target.checked)} disabled={generating || variationsEnabled} />
+                        Live build
+                      </label>
+                    ) : null}
+                    {mode === "new" ? (
+                      <label className={styles.variationToggle} title="Generate three candidate scenes; uses 3 generation runs">
+                        <input type="checkbox" checked={variationsEnabled} onChange={(event) => setVariationsEnabled(event.target.checked)} disabled={generating} />
+                        <span>×3 options</span>
+                        <small>uses 3</small>
+                      </label>
+                    ) : null}
+                  </div>
                 </div>
                 <textarea
                   className={styles.promptInput}
@@ -935,8 +1139,55 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
                   }}
                   disabled={generating}
                 />
-                <button className={styles.button} onClick={() => void generate()} disabled={generating || !prompt.trim()}>
-                  {generating ? (mode === "refine" ? "Refining…" : "Generating…") : mode === "refine" ? "Refine" : "Generate"}
+                <div
+                  className={referenceImage ? `${styles.referenceDrop} ${styles.referenceDropActive}` : styles.referenceDrop}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    void pickReferenceImage(event.dataTransfer.files[0]);
+                  }}
+                >
+                  {referenceImage ? (
+                    <>
+                      <img className={styles.referenceThumb} src={referenceImage.dataUrl} alt="" />
+                      <div className={styles.referenceMeta}>
+                        <span>Reference image</span>
+                        <strong>{referenceImage.name}</strong>
+                      </div>
+                      <button type="button" className={styles.ghostButton} onClick={() => setReferenceImage(null)} disabled={generating}>
+                        Clear
+                      </button>
+                    </>
+                  ) : (
+                    <label className={styles.referencePicker}>
+                      <input
+                        className={styles.fileInput}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        disabled={generating}
+                        onChange={(event) => {
+                          const file = event.currentTarget.files?.[0];
+                          event.currentTarget.value = "";
+                          void pickReferenceImage(file);
+                        }}
+                      />
+                      <span>Reference image</span>
+                      <strong>Add image</strong>
+                    </label>
+                  )}
+                </div>
+                <button className={styles.button} onClick={() => void generate()} disabled={generating || (!prompt.trim() && !referenceImage)}>
+                  {generating
+                    ? mode === "refine"
+                      ? "Refining…"
+                      : variationsEnabled
+                        ? "Generating options…"
+                        : "Generating…"
+                    : mode === "refine"
+                      ? "Refine"
+                      : variationsEnabled
+                        ? "Generate 3 options"
+                        : "Generate"}
                 </button>
                 {generating ? (
                   <button className={styles.button} onClick={() => generateAbortRef.current?.abort()} title="Stop this generation (keeps any objects already built)">
@@ -971,6 +1222,43 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
                 </div>
               ) : null}
 
+              {variationSet ? (
+                <div className={styles.variationPanel}>
+                  <div className={styles.variationHeader}>
+                    <div>
+                      <strong>Generated options</strong>
+                      <span>{variationSet.previewId ? "Previewing one candidate. Use it to save." : "Preview or use one candidate."}</span>
+                    </div>
+                    <button type="button" className={styles.ghostButton} onClick={discardVariations} disabled={generating}>
+                      Discard
+                    </button>
+                  </div>
+                  <div className={styles.variationList}>
+                    {variationSet.candidates.map((candidate) => {
+                      const active = variationSet.previewId === candidate.id;
+                      return (
+                        <article key={candidate.id} className={active ? `${styles.variationCard} ${styles.variationCardActive}` : styles.variationCard}>
+                          <div className={styles.variationCardTop}>
+                            <strong>{candidate.label}</strong>
+                            <span>{candidate.scene.nodes.length} root nodes</span>
+                          </div>
+                          <p>{candidate.scene.metadata.name || variationSet.prompt}</p>
+                          <div className={styles.variationObjects}>{variationObjectSummary(candidate.scene)}</div>
+                          <div className={styles.variationActions}>
+                            <button type="button" className={styles.ghostButton} onClick={() => previewVariation(candidate.id)} disabled={generating}>
+                              {active ? "Previewing" : "Preview"}
+                            </button>
+                            <button type="button" className={styles.button} onClick={() => useVariation(candidate.id)} disabled={generating}>
+                              Use
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
               {mode === "new" ? (
                 <ComposerControls
                   styleId={styleId}
@@ -992,6 +1280,41 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
                   ) : (
                     <span className={styles.refineHint}>whole scene — select an object to target it</span>
                   )}
+                </div>
+              ) : null}
+
+              {turnLog.length > 0 ? (
+                <div className={styles.turnLog}>
+                  <div className={styles.turnLogHeader}>
+                    <button type="button" className={styles.turnLogToggle} onClick={() => setTurnLogOpen((v) => !v)}>
+                      History <span>{turnLog.length}</span>
+                    </button>
+                    <button type="button" className={styles.ghostButton} onClick={clearTurnLog} disabled={generating}>
+                      Clear
+                    </button>
+                  </div>
+                  {turnLogOpen ? (
+                    <div className={styles.turnList}>
+                      {turnLog.map((turn) => (
+                        <article key={turn.id} className={styles.turnItem}>
+                          <div className={styles.turnMeta}>
+                            <span className={turnStatusClass(turn.status)}>{turnStatusLabel(turn.status)}</span>
+                            <span>{turn.mode}</span>
+                            <span>{formatTurnTime(turn.createdAt)}</span>
+                            {turn.hasReferenceImage ? <span>image</span> : null}
+                          </div>
+                          <p>{turn.prompt}</p>
+                          <div className={styles.turnActions}>
+                            {turn.selectedLabel ? <span className={styles.refineHint}>{turn.selectedLabel}</span> : <span />}
+                            <button type="button" className={styles.ghostButton} onClick={() => revertTurn(turn)} disabled={generating}>
+                              Revert
+                            </button>
+                          </div>
+                          {turn.message ? <div className={styles.turnMessage}>{turn.message}</div> : null}
+                        </article>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -1139,6 +1462,31 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
                 </span>
               </div>
             ) : null}
+            {selectedIds.length > 1 || canUngroupSelection ? (
+              <div className={styles.gizmoGroup}>
+                {selectedIds.length > 1 ? (
+                  <button
+                    className={`${styles.gizmoBtn} ${styles.gizmoIconBtn}`}
+                    onClick={groupSelection}
+                    disabled={!canGroupSelection}
+                    title={canGroupSelection ? "Group selected (⌘/Ctrl+G)" : "Group requires direct sibling nodes"}
+                    aria-label="Group selected"
+                  >
+                    <GroupIcon />
+                  </button>
+                ) : null}
+                {canUngroupSelection ? (
+                  <button
+                    className={`${styles.gizmoBtn} ${styles.gizmoIconBtn}`}
+                    onClick={ungroupSelection}
+                    title="Ungroup selected (⌘/Ctrl+Shift+G)"
+                    aria-label="Ungroup selected"
+                  >
+                    <UngroupIcon />
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
             {selectedIds.length > 0 ? (
               <div className={`${styles.gizmoGroup} ${styles.gizmoGroupDanger}`}>
                 <button
@@ -1151,7 +1499,10 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
                 </button>
               </div>
             ) : null}
-                                                      <AddObjectMenu onAdd={addObject} />
+            <AddObjectMenu onAdd={addObject} />
+          </div>
+
+          <div className={styles.sceneToolsDock} aria-label="Scene tools">
             <SceneSettingsMenu
               background={scene.background}
               fog={scene.fog}
@@ -1181,7 +1532,6 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
               onExportVideo={(res, fps) => runCapture(capture.exportVideo(res, fps))}
               onExportModel={() => runCapture(capture.exportModel())}
             />
-
           </div>
 
           <Canvas shadows camera={{ position: activeCamera.position ?? [3.4, 2.6, 4.4], fov: activeCamera.fov ?? 45 }} onPointerMissed={() => setSelectedIds([])}>
@@ -1414,6 +1764,42 @@ function formatElapsed(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatTurnTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function turnStatusLabel(status: TurnStatus): string {
+  if (status === "success") return "done";
+  if (status === "partial") return "partial";
+  if (status === "cancelled") return "cancelled";
+  return "failed";
+}
+
+function turnStatusClass(status: TurnStatus): string {
+  if (status === "success") return styles.turnStatusSuccess;
+  if (status === "partial") return styles.turnStatusPartial;
+  if (status === "cancelled") return styles.turnStatusCancelled;
+  return styles.turnStatusError;
+}
+
+function turnSelectedLabel(scene: Scene3D, id: string | null): string | undefined {
+  if (!id) return undefined;
+  const node = findNode(scene.nodes, id);
+  return node ? node.name ?? node.id : id;
+}
+
+function variationObjectSummary(scene: Scene3D): string {
+  const names = flattenNodes(scene.nodes)
+    .filter((node) => node.type !== "group")
+    .slice(0, 4)
+    .map((node) => node.name ?? node.id);
+  if (names.length === 0) return "No editable objects returned.";
+  const extra = Math.max(0, flattenNodes(scene.nodes).filter((node) => node.type !== "group").length - names.length);
+  return extra > 0 ? `${names.join(", ")} +${extra} more` : names.join(", ");
 }
 
 function transformsEqual(a: Transform, b: Transform): boolean {
@@ -1674,6 +2060,50 @@ function getEditorHistory(projectId: string): EditorHistory {
   return editorHistoryStore;
 }
 
+const MAX_TURN_LOG = 12;
+const TURN_LOG_KEY = (projectId: string) => `s3d:turnLog:${projectId}`;
+
+function createTurnId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function loadTurnLog(projectId: string): ComposerTurn[] {
+  try {
+    const raw = localStorage.getItem(TURN_LOG_KEY(projectId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as ComposerTurn[];
+    return Array.isArray(parsed) ? parsed.filter(isComposerTurn).slice(0, MAX_TURN_LOG) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveTurnLog(projectId: string, turns: ComposerTurn[]): void {
+  for (let count = Math.min(turns.length, MAX_TURN_LOG); count >= 0; count -= 1) {
+    try {
+      localStorage.setItem(TURN_LOG_KEY(projectId), JSON.stringify(turns.slice(0, count)));
+      return;
+    } catch {
+      // If image textures make snapshots too large, retry with fewer turns.
+    }
+  }
+}
+
+function isComposerTurn(value: unknown): value is ComposerTurn {
+  if (typeof value !== "object" || value === null) return false;
+  const turn = value as Partial<ComposerTurn>;
+  return (
+    typeof turn.id === "string" &&
+    typeof turn.createdAt === "string" &&
+    (turn.mode === "new" || turn.mode === "refine") &&
+    typeof turn.prompt === "string" &&
+    typeof turn.hasReferenceImage === "boolean" &&
+    (turn.status === "success" || turn.status === "error" || turn.status === "partial" || turn.status === "cancelled") &&
+    typeof turn.beforeScene === "object" &&
+    turn.beforeScene !== null
+  );
+}
+
 // Per-project persistence of collapsed outliner groups (survives reloads).
 const COLLAPSE_KEY = (projectId: string) => `s3d:collapsed:${projectId}`;
 
@@ -1734,8 +2164,152 @@ function removeNodesFromTree(nodes: SceneNode[], ids: Set<string>): SceneNode[] 
     .map((node) => (node.type === "group" ? { ...node, children: removeNodesFromTree(node.children, ids) } : node));
 }
 
+interface GroupResult {
+  nodes: SceneNode[];
+  groupId: string;
+}
+
+interface UngroupResult {
+  nodes: SceneNode[];
+  childIds: string[];
+}
+
+function canGroupNodes(nodes: SceneNode[], ids: Set<string>): boolean {
+  if (ids.size < 2) return false;
+  return Boolean(findSiblingSelection(nodes, ids));
+}
+
+function groupSelectedNodes(nodes: SceneNode[], ids: Set<string>, existing: Set<string>): GroupResult | null {
+  const siblingSelection = findSiblingSelection(nodes, ids);
+  if (!siblingSelection) return null;
+  const groupId = nextSceneId("group", existing);
+  const groupName = nextGroupName(existing);
+  return groupInList(nodes, ids, groupId, groupName);
+}
+
+function ungroupSelectedNodes(nodes: SceneNode[], ids: Set<string>): UngroupResult | null {
+  const childIds: string[] = [];
+  const next = ungroupInList(nodes, ids, childIds);
+  return childIds.length > 0 ? { nodes: next, childIds } : null;
+}
+
+function findSiblingSelection(nodes: SceneNode[], ids: Set<string>): SceneNode[] | null {
+  const selectedHere = nodes.filter((node) => ids.has(node.id));
+  if (selectedHere.length === ids.size) return selectedHere;
+  if (selectedHere.length > 0) return null;
+  for (const node of nodes) {
+    if (node.type !== "group") continue;
+    const match = findSiblingSelection(node.children, ids);
+    if (match) return match;
+  }
+  return null;
+}
+
+function groupInList(nodes: SceneNode[], ids: Set<string>, groupId: string, groupName: string): GroupResult | null {
+  const selectedHere = nodes.filter((node) => ids.has(node.id));
+  if (selectedHere.length === ids.size) {
+    const groupTransform = selectionCenterTransform(selectedHere);
+    const inverseGroup = transformMatrix(groupTransform).invert();
+    const groupNode: SceneNode = {
+      id: groupId,
+      type: "group",
+      name: groupName,
+      transform: groupTransform,
+      children: selectedHere.map((node) => applyRelativeMatrix(node, inverseGroup))
+    };
+    let inserted = false;
+    const nextNodes = nodes.flatMap((node) => {
+      if (!ids.has(node.id)) return [node];
+      if (inserted) return [];
+      inserted = true;
+      return [groupNode];
+    });
+    return { nodes: nextNodes, groupId };
+  }
+
+  for (const node of nodes) {
+    if (node.type !== "group") continue;
+    const grouped = groupInList(node.children, ids, groupId, groupName);
+    if (!grouped) continue;
+    return {
+      nodes: nodes.map((candidate) => (candidate.id === node.id ? { ...node, children: grouped.nodes } : candidate)),
+      groupId
+    };
+  }
+  return null;
+}
+
+function ungroupInList(nodes: SceneNode[], ids: Set<string>, childIds: string[]): SceneNode[] {
+  return nodes.flatMap((node) => {
+    if (node.type === "group" && ids.has(node.id)) {
+      const groupMatrix = transformMatrix(normalizeTransform(node.transform));
+      return node.children.map((child) => {
+        childIds.push(child.id);
+        return applyRelativeMatrix(child, groupMatrix);
+      });
+    }
+    return node.type === "group" ? [{ ...node, children: ungroupInList(node.children, ids, childIds) }] : [node];
+  });
+}
+
+function selectionCenterTransform(nodes: SceneNode[]): Transform {
+  const positions = nodes.map((node) => normalizeTransform(node.transform).position);
+  const count = Math.max(1, positions.length);
+  return {
+    position: [
+      roundTransform(positions.reduce((sum, position) => sum + position[0], 0) / count),
+      roundTransform(positions.reduce((sum, position) => sum + position[1], 0) / count),
+      roundTransform(positions.reduce((sum, position) => sum + position[2], 0) / count)
+    ],
+    rotation: [0, 0, 0],
+    scale: [1, 1, 1]
+  };
+}
+
+function applyRelativeMatrix(node: SceneNode, relative: Matrix4): SceneNode {
+  const transform = matrixTransform(relative.clone().multiply(transformMatrix(normalizeTransform(node.transform))));
+  return { ...node, transform };
+}
+
+function transformMatrix(transform: Transform): Matrix4 {
+  const position = new Vector3(transform.position[0], transform.position[1], transform.position[2]);
+  const quaternion = new Quaternion().setFromEuler(new Euler(transform.rotation[0], transform.rotation[1], transform.rotation[2], "XYZ"));
+  const scale = new Vector3(transform.scale[0], transform.scale[1], transform.scale[2]);
+  return new Matrix4().compose(position, quaternion, scale);
+}
+
+function matrixTransform(matrix: Matrix4): Transform {
+  const position = new Vector3();
+  const quaternion = new Quaternion();
+  const scale = new Vector3();
+  matrix.decompose(position, quaternion, scale);
+  const rotation = new Euler().setFromQuaternion(quaternion, "XYZ");
+  return {
+    position: [roundTransform(position.x), roundTransform(position.y), roundTransform(position.z)],
+    rotation: [roundTransform(rotation.x), roundTransform(rotation.y), roundTransform(rotation.z)],
+    scale: [roundTransform(scale.x), roundTransform(scale.y), roundTransform(scale.z)]
+  };
+}
+
+function roundTransform(value: number): number {
+  return Math.abs(value) < 1e-9 ? 0 : Math.round(value * 1_000_000) / 1_000_000;
+}
+
 function collectIds(nodes: SceneNode[]): Set<string> {
   return new Set(flattenNodes(nodes).map((n) => n.id));
+}
+
+function nextSceneId(prefix: string, existing: Set<string>): string {
+  let i = existing.size + 1;
+  let candidate = `${prefix}-${i}`;
+  while (existing.has(candidate)) candidate = `${prefix}-${++i}`;
+  existing.add(candidate);
+  return candidate;
+}
+
+function nextGroupName(existing: Set<string>): string {
+  let i = existing.size + 1;
+  return `Group ${i}`;
 }
 
 function uniqueId(base: string, existing: Set<string>): string {

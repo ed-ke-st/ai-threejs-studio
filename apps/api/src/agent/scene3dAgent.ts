@@ -36,6 +36,7 @@ export class Scene3DAgent {
     projectId: string;
     prompt: string;
     retrievedContext?: RagChunk[];
+    referenceImage?: string;
     mode?: "new" | "refine";
     selectedObjectId?: string;
     /** Caller cancellation (e.g. the HTTP client disconnected) — aborts the in-flight
@@ -66,6 +67,7 @@ export class Scene3DAgent {
       prompt: input.prompt,
       currentScene: promptScene,
       retrievedContext,
+      referenceImage: input.referenceImage,
       mode: input.mode,
       selectedContext,
       signal: input.signal

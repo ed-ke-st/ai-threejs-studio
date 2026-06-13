@@ -91,7 +91,7 @@ The payoff for the timeline — a shareable clip.
 
 ## Tier 3 — AI Workflow (differentiation)
 
-### 6. Image-to-scene (reference image input)
+### 6. Image-to-scene (reference image input) — DONE
 "Build this" from a photo.
 
 - **Providers:** multimodal user message — Anthropic `image` blocks, OpenAI
@@ -99,23 +99,33 @@ The payoff for the timeline — a shareable clip.
 - **Plumbing:** `GenerateScene3DInput` gains `referenceImage?` (data-URI); thread
   through agent + `/agent-run` route (`image/reference` asset kind exists).
 - **Editor:** image drop-zone in the composer; thumbnail + clear.
+- **Status:** editor sends a downscaled data URI to `/agent-run`; OpenAI receives
+  `input_image`, Claude receives an image block, and image-only generation uses a
+  default "build from the attached reference" prompt.
 - **Effort:** M. **Risk:** prompt-tuning to extract structure, not photo-match.
 
-### 7. Variations ("Generate 3")
+### 7. Variations ("Generate 3") — DONE
 Generate N candidates, pick the best.
 
-- **Approach:** N parallel `/agent-run` calls (streaming + cancel infra makes this
-  cheap) into throwaway scratch scenes; render thumbnails; click to commit.
+- **Approach:** opt-in multi-candidate `/agent-run` mode generates validated
+  candidate scenes, restores the original scene server-side, and returns
+  `variations[]` for explicit user choice.
 - **Quota:** counts as N runs — surface clearly.
-- **UI:** "×3" toggle on Generate; results strip with Use/Discard.
+- **UI:** "×3 options" checkbox in New mode, off by default; result cards expose
+  Preview, Use, and Discard.
+- **Status:** DONE. The original scene stays unsaved until a candidate is chosen;
+  `Use` saves through the normal Scene3D endpoint and records history.
 - **Effort:** M–L. **Risk:** cost/quota UX.
 
-### 8. Chat-style refine history
+### 8. Chat-style refine history — DONE
 Iterative conversation with per-turn context + undo.
 
 - **Approach:** per-project turn log (prompt + scene snapshot); reuse existing undo
   snapshots, surface as a visible thread.
 - **Editor:** collapsible history panel in the composer; each turn revertable.
+- **Status:** composer shows a per-project local turn log with mode/status,
+  reference-image and target context, failed/partial run messages, and a `Revert`
+  action that restores the pre-turn scene through the normal save/undo path.
 - **Effort:** M. **Risk:** low (mostly UI + small persistence).
 
 ---
@@ -125,17 +135,24 @@ Iterative conversation with per-turn context + undo.
 ### 9. Scene-settings panel (hosts #1, #2)
 A small panel/tab for scene-level fields with no UI today: fog, background color,
 environment (#2), post-processing (#1). Build alongside Tier 1.
+**Status:** DONE as World menu; UI polish split World, Camera, and Capture into
+a dedicated responsive scene-tools dock outside the transform gizmo bar.
 **Effort:** S (shell).
 
 ### 10. Group / ungroup selection
 Wrap N selected nodes into a group (preserve world transforms) / dissolve a group.
 Pure client + `updateNode` helpers.
+**Status:** DONE. Multi-selected direct siblings can be grouped from the viewport
+toolbar or ⌘/Ctrl+G; selected groups can be dissolved with ⌘/Ctrl+Shift+G.
+Matrix composition preserves child transforms through group and ungroup.
 **Effort:** S–M. **Risk:** world-transform preservation math.
 
 ### 11. Material preset library
 One-click gold/chrome/glass/plastic/neon/matte on the selected mesh. Static preset
 table merged into `material`. `material/preset` asset kind exists for user-saved
 presets later.
+**Status:** DONE. Mesh material inspector includes preset chips with swatches;
+the same controls render in the desktop rail flyout and mobile inspector.
 **Effort:** S.
 
 ---
@@ -148,6 +165,12 @@ presets later.
 3. ~~**#3 GLB export**~~ — DONE (Capture menu → Export model; client-side
    GLTFExporter on the offscreen CaptureStage graph. Static pose only — animation
    baking, plus camera/fov which don't map to glTF, are a follow-up).
-4. **#11 presets + #10 group/ungroup** — cheap ergonomics, interleave anytime. **← next**
-5. **#6 image-to-scene → #7 variations → #8 chat history** — AI tier, most
-   product-defining, most effort.
+4. ~~**#11 presets + #10 group/ungroup**~~ — DONE (material preset chips plus
+   transform-preserving group/ungroup actions).
+5. ~~**#6 image-to-scene**~~ — DONE (composer reference-image picker/drop zone;
+   data URI threaded through `/agent-run` to OpenAI/Claude vision message
+   formats).
+6. ~~**#7 variations**~~ — DONE (optional, default-off candidate generation with
+   explicit preview/use/discard).
+7. ~~**#8 chat history**~~ — DONE (composer thread with per-turn snapshots and
+   revert).

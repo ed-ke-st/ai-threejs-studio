@@ -372,6 +372,48 @@
   padding: 0 12px 12px;
 }
 
+.presetGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.presetChip {
+  min-width: 0;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.018));
+  color: var(--c-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.presetChip:hover {
+  border-color: var(--c-accent);
+  color: var(--c-text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.presetChip:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+.presetSwatch {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.35), 0 3px 10px rgba(0, 0, 0, 0.24);
+}
+
 .row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(96px, 46%);
@@ -624,6 +666,17 @@
   .groupBody {
     padding: 0 12px 14px;
     gap: 12px;
+  }
+
+  .presetGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .presetChip {
+    min-height: 42px;
+    justify-content: center;
+    padding: 7px 6px;
+    font-size: 11px;
   }
 
   .row {

@@ -62,7 +62,7 @@ export class ClaudeSceneGenerator implements SceneGenerator {
       label: `generate (${input.mode ?? "new"})`,
       model: this.options.model,
       system: this.systemBlocks(input),
-      user: this.userText(input),
+      user: this.userContent(input),
       signal: input.signal
     });
   }
@@ -73,7 +73,7 @@ export class ClaudeSceneGenerator implements SceneGenerator {
       label: `generateStreaming (${input.mode ?? "new"})`,
       model: this.options.model,
       system: this.systemBlocks(input),
-      user: this.userText(input),
+      user: this.userContent(input),
       signal: input.signal,
       // Emit each top-level node the moment it finishes streaming.
       onDelta: (delta) => {
@@ -93,7 +93,7 @@ export class ClaudeSceneGenerator implements SceneGenerator {
         { type: "text", text: SCENE3D_SYSTEM_INSTRUCTION, cache_control: CACHE },
         { type: "text", text: `${SCENE3D_REFINE_DIFF_PREAMBLE}\n\nReturn only the JSON patch object, no markdown.` }
       ],
-      user: this.userText(input),
+      user: this.userContent(input),
       signal: input.signal
     });
   }
@@ -115,7 +115,7 @@ export class ClaudeSceneGenerator implements SceneGenerator {
     label: string;
     model: string;
     system: Anthropic.TextBlockParam[];
-    user: string;
+    user: Anthropic.MessageParam["content"];
     signal?: AbortSignal;
     onDelta?: (delta: string) => void;
   }): Promise<string | null> {
@@ -166,10 +166,28 @@ export class ClaudeSceneGenerator implements SceneGenerator {
   private userText(input: GenerateScene3DInput): string {
     return joinParts(buildGenerationParts(input, { includeFewShot: false }));
   }
+
+  private userContent(input: GenerateScene3DInput): Anthropic.MessageParam["content"] {
+    const text = this.userText(input);
+    const image = input.referenceImage ? parseDataImage(input.referenceImage) : null;
+    if (!image) return text;
+    return [
+      { type: "text", text },
+      { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } }
+    ];
+  }
 }
 
 function joinParts(parts: Array<string | null | undefined>): string {
   return parts.filter(Boolean).join("\n\n");
+}
+
+function parseDataImage(dataUri: string): { mediaType: "image/jpeg" | "image/png" | "image/webp" | "image/gif"; data: string } | null {
+  const match = dataUri.match(/^data:(image\/(?:jpeg|jpg|png|webp|gif));base64,([a-z0-9+/=]+)$/i);
+  if (!match) return null;
+  const mediaType = match[1].toLowerCase() === "image/jpg" ? "image/jpeg" : match[1].toLowerCase();
+  if (mediaType !== "image/jpeg" && mediaType !== "image/png" && mediaType !== "image/webp" && mediaType !== "image/gif") return null;
+  return { mediaType, data: match[2] };
 }
 
 // Logs token usage with a cache-hit breakdown so caching can be verified at a

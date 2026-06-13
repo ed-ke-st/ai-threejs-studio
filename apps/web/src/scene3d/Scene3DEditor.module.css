@@ -37,12 +37,26 @@
 /* New / Refine segmented toggle */
 .modeToggle {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.modeButtons {
+  display: flex;
   gap: 2px;
   background: var(--c-bg-input);
   border: 1px solid var(--c-border);
   border-radius: var(--radius-md);
   padding: 2px;
-  flex: 0 0 auto;
+}
+
+.modeOptions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
 }
 
 .modeBtn {
@@ -53,6 +67,7 @@
   padding: 5px 12px;
   font-size: 12px;
   cursor: pointer;
+  flex: 1 1 0;
 }
 
 .modeBtn:hover:not(.modeBtnActive) {
@@ -72,6 +87,83 @@
   border-radius: var(--radius);
   padding: 6px 10px;
   font-size: 12px;
+}
+
+.referenceDrop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 6px;
+  border: 1px dashed #26364a;
+  border-radius: var(--radius);
+  background: rgba(10, 18, 29, 0.55);
+  color: var(--c-text-muted);
+}
+
+.referenceDrop:hover {
+  border-color: #34507a;
+  color: var(--c-text);
+}
+
+.referenceDropActive {
+  border-style: solid;
+  background: #102033;
+}
+
+.referencePicker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.referencePicker strong {
+  color: var(--c-text-selected);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.fileInput {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.referenceThumb {
+  width: 42px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  border: 1px solid #314157;
+  background: #050910;
+}
+
+.referenceMeta {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+  color: var(--c-text-dim);
+}
+
+.referenceMeta strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--c-text);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .button {
@@ -121,6 +213,46 @@
   color: var(--c-text-muted);
   cursor: pointer;
   user-select: none;
+}
+
+.liveToggle:has(input:disabled) {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.variationToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid #26364a;
+  border-radius: 999px;
+  color: var(--c-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.variationToggle:hover {
+  border-color: #34507a;
+  color: var(--c-text);
+}
+
+.variationToggle:has(input:checked) {
+  background: #16314b;
+  border-color: var(--c-accent);
+  color: var(--c-text-selected);
+}
+
+.variationToggle:has(input:disabled) {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.variationToggle small {
+  color: var(--c-text-dim);
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .progressPill {
@@ -219,6 +351,209 @@
 .refineHint {
   font-size: 11px;
   color: #6b7c93;
+}
+
+.turnLog {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-top: 8px;
+  border-top: 1px solid #15202f;
+}
+
+.turnLogHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.turnLogToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: transparent;
+  color: var(--c-text);
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+}
+
+.turnLogToggle span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #16314b;
+  color: var(--c-text-selected);
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+.turnList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.turnItem {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #1b2a3d;
+  border-radius: var(--radius);
+  background: rgba(10, 18, 29, 0.52);
+}
+
+.turnMeta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  color: var(--c-text-dim);
+  font-size: 10px;
+}
+
+.turnMeta span {
+  border: 1px solid #27384e;
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
+.turnItem p {
+  margin: 0;
+  color: var(--c-text);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.turnActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.turnStatusSuccess {
+  color: #8fe6b0;
+  border-color: #245d3a !important;
+}
+
+.turnStatusPartial {
+  color: #f2c14e;
+  border-color: #5c451c !important;
+}
+
+.turnStatusError,
+.turnStatusCancelled {
+  color: #ff9b9b;
+  border-color: #653030 !important;
+}
+
+.turnMessage {
+  color: var(--c-danger);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.variationPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid #21324a;
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at top left, rgba(74, 163, 255, 0.16), transparent 42%),
+    rgba(10, 18, 29, 0.62);
+}
+
+.variationHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.variationHeader div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.variationHeader strong {
+  font-size: 12px;
+}
+
+.variationHeader span {
+  color: var(--c-text-dim);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.variationList {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 7px;
+}
+
+.variationCard {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid #1b2a3d;
+  border-radius: var(--radius);
+  background: rgba(6, 12, 21, 0.58);
+}
+
+.variationCardActive {
+  border-color: var(--c-accent);
+  background: rgba(22, 49, 75, 0.7);
+}
+
+.variationCardTop,
+.variationActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.variationCardTop strong {
+  font-size: 12px;
+}
+
+.variationCardTop span,
+.variationObjects {
+  color: var(--c-text-dim);
+  font-size: 10px;
+}
+
+.variationCard p {
+  margin: 0;
+  color: var(--c-text);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.variationObjects {
+  line-height: 1.35;
 }
 
 /* Body: outliner | canvas | inspector */
@@ -490,6 +825,24 @@
   backdrop-filter: blur(4px);
 }
 
+.sceneToolsDock {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  max-width: 168px;
+  padding: 4px;
+  background: rgba(10, 18, 29, 0.82);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(8px);
+}
+
 .gizmoGroup {
   display: inline-flex;
   align-items: center;
@@ -631,8 +984,15 @@
     width: 100%;
   }
 
-  .modeBtn {
-    flex: 1 1 0;
+  .modeOptions {
+    align-items: stretch;
+  }
+
+  .liveToggle,
+  .variationToggle {
+    flex: 1 1 145px;
+    justify-content: center;
+    min-height: 34px;
   }
 
   .promptInput {
@@ -643,6 +1003,13 @@
 
   .button {
     width: 100%;
+    justify-content: center;
+  }
+
+  .variationActions .button,
+  .variationActions .ghostButton {
+    width: auto;
+    flex: 1 1 0;
     justify-content: center;
   }
 
@@ -686,6 +1053,23 @@
   .gizmoGroup {
     flex-wrap: nowrap;
     flex: 0 0 auto;
+  }
+
+  .sceneToolsDock {
+    top: 62px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-width: none;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .sceneToolsDock::-webkit-scrollbar {
+    display: none;
   }
 
   .mobileDock {
@@ -850,7 +1234,7 @@
   }
 
   .canvasMain {
-    flex: 0 0 42svh;
+    flex: 0 0 45svh;
     min-height: 0;
   }
 
@@ -862,6 +1246,11 @@
   .gizmoGroup {
     width: auto;
     justify-content: center;
+  }
+
+  .sceneToolsDock {
+    top: 58px;
+    padding: 5px;
   }
 
   .gizmoDivider {

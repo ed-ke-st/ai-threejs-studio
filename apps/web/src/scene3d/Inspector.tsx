@@ -591,6 +591,55 @@ function MeshSetupControls({ node, onChange }: { node: MeshNode; onChange: (next
   );
 }
 
+type MaterialType = NonNullable<NonNullable<MeshNode["material"]>["type"]>;
+const MATERIAL_TYPES: MaterialType[] = ["standard", "physical", "basic"];
+
+interface MaterialPreset {
+  id: string;
+  label: string;
+  swatch: string;
+  material: Partial<NonNullable<MeshNode["material"]>>;
+}
+
+const MATERIAL_PRESETS: MaterialPreset[] = [
+  {
+    id: "gold",
+    label: "Gold",
+    swatch: "linear-gradient(135deg, #fff1a8, #f2b84b 48%, #8d5a12)",
+    material: { type: "standard", color: "#f4c65a", metalness: 1, roughness: 0.22, emissive: "#000000", emissiveIntensity: 0, opacity: 1, transmission: 0 }
+  },
+  {
+    id: "chrome",
+    label: "Chrome",
+    swatch: "linear-gradient(135deg, #ffffff, #98a8b8 48%, #1f2937)",
+    material: { type: "standard", color: "#d9e5f0", metalness: 1, roughness: 0.06, emissive: "#000000", emissiveIntensity: 0, opacity: 1, transmission: 0 }
+  },
+  {
+    id: "glass",
+    label: "Glass",
+    swatch: "linear-gradient(135deg, rgba(236,253,255,0.95), rgba(103,232,249,0.35), rgba(15,23,42,0.25))",
+    material: { type: "physical", color: "#d7fbff", metalness: 0, roughness: 0.03, opacity: 0.42, transmission: 0.86, ior: 1.45, thickness: 0.8, emissive: "#000000", emissiveIntensity: 0 }
+  },
+  {
+    id: "plastic",
+    label: "Plastic",
+    swatch: "linear-gradient(135deg, #93c5fd, #2563eb 58%, #172554)",
+    material: { type: "standard", color: "#2563eb", metalness: 0, roughness: 0.34, emissive: "#000000", emissiveIntensity: 0, opacity: 1, transmission: 0 }
+  },
+  {
+    id: "neon",
+    label: "Neon",
+    swatch: "radial-gradient(circle at 35% 35%, #ffffff, #5eead4 28%, #0891b2 70%, #0f172a)",
+    material: { type: "standard", color: "#0f172a", metalness: 0.05, roughness: 0.25, emissive: "#38f8ff", emissiveIntensity: 3.2, opacity: 1, transmission: 0 }
+  },
+  {
+    id: "matte",
+    label: "Matte",
+    swatch: "linear-gradient(135deg, #f8fafc, #cbd5e1 58%, #64748b)",
+    material: { type: "standard", color: "#d9dee7", metalness: 0, roughness: 0.88, emissive: "#000000", emissiveIntensity: 0, opacity: 1, transmission: 0 }
+  }
+];
+
 function MeshMaterialControls({
   compact,
   node,
@@ -601,7 +650,7 @@ function MeshMaterialControls({
   onChange: (next: SceneNode) => void;
 }) {
   const material = node.material ?? {};
-  const setMaterial = (patch: Partial<MeshNode["material"]>) => onChange({ ...node, material: { ...material, ...patch } });
+  const setMaterial = (patch: Partial<NonNullable<MeshNode["material"]>>) => onChange({ ...node, material: { ...material, ...patch } });
 
   return (
     <section className={styles.section}>
@@ -610,6 +659,14 @@ function MeshMaterialControls({
         <span>Surface color, shading, and finish</span>
       </div>
       <FieldGroup title="Surface" defaultOpen>
+        <div className={styles.presetGrid} aria-label="Material presets">
+          {MATERIAL_PRESETS.map((preset) => (
+            <button key={preset.id} className={styles.presetChip} onClick={() => setMaterial(preset.material)} type="button" title={`Apply ${preset.label} material`}>
+              <span className={styles.presetSwatch} style={{ background: preset.swatch }} aria-hidden="true" />
+              <span>{preset.label}</span>
+            </button>
+          ))}
+        </div>
         <ColorRow label="Color" value={material.color ?? "#cbd5e1"} onChange={(value) => setMaterial({ color: value })} />
         <ColorRow label="Emissive" value={material.emissive ?? "#000000"} onChange={(value) => setMaterial({ emissive: value })} />
         <NumberRow
@@ -646,9 +703,6 @@ function MeshMaterialControls({
     </section>
   );
 }
-
-type MaterialType = NonNullable<NonNullable<MeshNode["material"]>["type"]>;
-const MATERIAL_TYPES: MaterialType[] = ["standard", "physical", "basic"];
 
 type TextureSource = "none" | "pattern" | "image";
 

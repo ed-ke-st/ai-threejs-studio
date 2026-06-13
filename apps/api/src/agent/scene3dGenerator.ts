@@ -21,6 +21,8 @@ export interface GenerateScene3DInput {
   prompt: string;
   currentScene: string; // current scene.config.json (Scene3D)
   retrievedContext: RagChunk[];
+  /** Optional data-URI reference image for image-to-scene generation/refine. */
+  referenceImage?: string;
   /** "new" rebuilds from scratch; "refine" edits the current scene minimally. */
   mode?: "new" | "refine";
   /** In refine mode, a description of the node the user has selected so that
@@ -116,6 +118,9 @@ export function buildGenerationParts(
     refine && input.selectedContext
       ? `The user has SELECTED this node — interpret "this", "it", "the selected object", "the selected light", etc. as referring to it, and edit it in place (keep its id). Leave other nodes unchanged unless the request clearly implies otherwise:\n${input.selectedContext}`
       : null,
+    input.referenceImage
+      ? "A reference image is attached. Use it to infer the scene's major objects, layout, proportions, materials, colors, lighting, and camera framing. Recreate the scene as editable procedural 3D geometry; do not attempt photoreal texture matching and do not invent external image or model URLs."
+      : null,
     refine || !includeFewShot ? null : selectFewShotBlock(input.prompt),
     `Relevant reference context:\n${formatContext(input.retrievedContext)}`,
     `Current scene.config.json (Scene3D):\n${input.currentScene}`
@@ -141,7 +146,7 @@ export class Scene3DGenerator implements SceneGenerator {
 
   async generate(input: GenerateScene3DInput): Promise<string | null> {
     const { instructions, parts } = this.buildGeneration(input);
-    return this.streamCall({ model: this.options.model, instructions, parts, signal: input.signal });
+    return this.streamCall({ model: this.options.model, instructions, parts, referenceImage: input.referenceImage, signal: input.signal });
   }
 
   // Streaming variant: emits each top-level scene node via `onNode` the moment it
@@ -154,6 +159,7 @@ export class Scene3DGenerator implements SceneGenerator {
       model: this.options.model,
       instructions,
       parts,
+      referenceImage: input.referenceImage,
       signal: input.signal,
       onDelta: (delta) => {
         for (const node of nodeParser.push(delta)) {
@@ -176,6 +182,7 @@ export class Scene3DGenerator implements SceneGenerator {
       model: this.options.model,
       instructions: `${SCENE3D_REFINE_DIFF_INSTRUCTION}\n\nReturn only the JSON patch object, no markdown.`,
       parts: buildGenerationParts(input),
+      referenceImage: input.referenceImage,
       signal: input.signal
     });
   }
@@ -196,6 +203,7 @@ export class Scene3DGenerator implements SceneGenerator {
     model: string;
     instructions: string;
     parts: Array<string | null | undefined>;
+    referenceImage?: string;
     signal?: AbortSignal;
     onDelta?: (delta: string) => void;
   }): Promise<string | null> {
@@ -216,7 +224,7 @@ export class Scene3DGenerator implements SceneGenerator {
         body: JSON.stringify({
           model: call.model,
           instructions: call.instructions,
-          input: [{ role: "user", content: [{ type: "input_text", text: call.parts.filter(Boolean).join("\n\n") }] }],
+          input: [{ role: "user", content: openAiContent(call.parts, call.referenceImage) }],
           stream: true
         })
       });
@@ -410,6 +418,14 @@ export const SCENE3D_REPAIR_INSTRUCTION = [
 interface OpenAiResponse {
   output_text?: string;
   output?: Array<{ content?: Array<{ text?: string; type?: string }> }>;
+}
+
+function openAiContent(parts: Array<string | null | undefined>, referenceImage?: string): unknown[] {
+  const content: unknown[] = [{ type: "input_text", text: parts.filter(Boolean).join("\n\n") }];
+  if (referenceImage) {
+    content.push({ type: "input_image", image_url: referenceImage });
+  }
+  return content;
 }
 
 function extractOutputText(response: OpenAiResponse): string | null {

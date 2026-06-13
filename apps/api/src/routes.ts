@@ -47,6 +47,11 @@ const uploadAssetSchema = z.object({
   contentBase64: z.string().min(1)
 });
 
+const referenceImageSchema = z
+  .string()
+  .max(1_500_000)
+  .regex(/^data:image\/(?:jpeg|jpg|png|webp);base64,[a-z0-9+/=]+$/i);
+
 const createSnapshotSchema = z.object({
   label: z.string().min(1).max(80).optional()
 });
@@ -264,7 +269,9 @@ export function registerRoutes(
         prompt: z.string().min(1),
         mode: z.enum(["new", "refine"]).optional(),
         selectedObjectId: z.string().min(1).optional(),
-        stream: z.boolean().optional()
+        stream: z.boolean().optional(),
+        referenceImage: referenceImageSchema.optional(),
+        variationCount: z.number().int().min(1).max(3).optional()
       })
       .safeParse(request.body ?? {});
     if (!body.success) {
@@ -306,11 +313,18 @@ export function registerRoutes(
       return reply.code(400).send({ error: useClaude ? "No Anthropic API key is configured." : "No OpenAI API key is configured." });
     }
 
+    const variationCount = body.data.mode === "refine" ? 1 : body.data.variationCount ?? 1;
+
     // Per-user daily quota (no-op single-tenant). Counts the attempt before the
     // expensive run; must happen before reply.hijack() so we can still send 429.
-    const quota = await usageService.consume(request.userId, "agentRun");
-    if (!quota.allowed) {
-      return reply.code(429).send({ error: `Daily generation limit reached (${quota.limit}/day). Try again tomorrow.` });
+    let consumedRuns = 0;
+    for (let i = 0; i < variationCount; i += 1) {
+      const quota = await usageService.consume(request.userId, "agentRun");
+      if (!quota.allowed) {
+        for (let j = 0; j < consumedRuns; j += 1) await usageService.refund(request.userId, "agentRun").catch(() => {});
+        return reply.code(429).send({ error: `Daily generation limit reached (${quota.limit}/day). Try again tomorrow.` });
+      }
+      consumedRuns += 1;
     }
 
     const retrievedContext = await ragService.searchDocs({
@@ -348,21 +362,54 @@ export function registerRoutes(
     try {
       // Tell the client which model is running so the progress UI can show it.
       write({ type: "meta", model: generationModel });
-      const result = await agent.run({
-        projectId: id,
-        prompt: body.data.prompt,
-        retrievedContext,
-        mode: body.data.mode,
-        selectedObjectId: body.data.selectedObjectId,
-        signal: abort.signal,
-        onProgress: (stage) => write({ type: "progress", stage }),
-        onNode: body.data.stream ? (node) => write({ type: "partial-node", node }) : undefined
-      });
-      await projectRepository.touchProject(id);
-      write({ type: "result", result });
+      if (variationCount > 1) {
+        const originalScene = await readScene3D(storage, id);
+        const variations = [];
+        try {
+          for (let i = 0; i < variationCount; i += 1) {
+            await writeScene3D(storage, id, originalScene);
+            const label = `Option ${i + 1}`;
+            const variationPrompt = `${body.data.prompt}\n\nVariation brief: Generate ${label} of ${variationCount}. Make this candidate meaningfully distinct in composition, object choices, materials, or camera framing while still satisfying the original request.`;
+            const result = await agent.run({
+              projectId: id,
+              prompt: variationPrompt,
+              retrievedContext,
+              referenceImage: body.data.referenceImage,
+              mode: "new",
+              signal: abort.signal,
+              onProgress: (stage) => write({ type: "progress", stage: `${label}: ${stage}` })
+            });
+            variations.push({
+              id: `variation-${i + 1}`,
+              label,
+              scene: result.scene,
+              issues: result.issues,
+              attempts: result.attempts,
+              ok: result.ok
+            });
+          }
+        } finally {
+          await writeScene3D(storage, id, originalScene).catch(() => {});
+        }
+        write({ type: "result", result: { variations } });
+      } else {
+        const result = await agent.run({
+          projectId: id,
+          prompt: body.data.prompt,
+          retrievedContext,
+          referenceImage: body.data.referenceImage,
+          mode: body.data.mode,
+          selectedObjectId: body.data.selectedObjectId,
+          signal: abort.signal,
+          onProgress: (stage) => write({ type: "progress", stage }),
+          onNode: body.data.stream ? (node) => write({ type: "partial-node", node }) : undefined
+        });
+        await projectRepository.touchProject(id);
+        write({ type: "result", result });
+      }
     } catch (error) {
       // A failed or cancelled run shouldn't count against the daily quota.
-      await usageService.refund(request.userId, "agentRun").catch(() => {});
+      for (let i = 0; i < consumedRuns; i += 1) await usageService.refund(request.userId, "agentRun").catch(() => {});
       write({ type: "error", message: error instanceof Error ? error.message : "Generation failed." });
     } finally {
       clearInterval(heartbeat);
@@ -773,6 +820,16 @@ async function readScene3D(storage: ProjectStorage, projectId: string) {
     return validateScene3D(JSON.parse(file.content)).scene;
   } catch {
     return defaultScene3D();
+  }
+}
+
+async function writeScene3D(storage: ProjectStorage, projectId: string, scene: unknown): Promise<void> {
+  const { scene: validated } = validateScene3D(scene);
+  for (const file of createScene3DSceneFiles(validated)) {
+    const existing = await storage.getProjectFile(projectId, file.path);
+    if (!existing || existing.content !== file.content) {
+      await storage.writeProjectFile(projectId, file.path, file.content);
+    }
   }
 }
 

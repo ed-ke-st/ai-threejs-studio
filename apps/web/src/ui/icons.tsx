@@ -222,6 +222,31 @@ export function ScaleIcon({ size, ...props }: IconProps) {
   );
 }
 
+export function GroupIcon({ size, ...props }: IconProps) {
+  const resolved = resolveSize(size, 14);
+  return (
+    <svg width={resolved} height={resolved} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x="4" y="5" width="6" height="6" rx="1.2" />
+      <rect x="14" y="13" width="6" height="6" rx="1.2" />
+      <path d="M4 16v1.5A2.5 2.5 0 0 0 6.5 20H8" />
+      <path d="M16 4h1.5A2.5 2.5 0 0 1 20 6.5V8" />
+      <path d="M11 8h2M17 11v1M9 13v1" />
+    </svg>
+  );
+}
+
+export function UngroupIcon({ size, ...props }: IconProps) {
+  const resolved = resolveSize(size, 14);
+  return (
+    <svg width={resolved} height={resolved} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x="4" y="5" width="6" height="6" rx="1.2" />
+      <rect x="14" y="13" width="6" height="6" rx="1.2" />
+      <path d="M12 8h2.4M9.6 13.6 12 16M16 10.5V8M10 16h2.5" />
+      <path d="m15.5 5.5 3-3M18.5 5.5l-3-3" />
+    </svg>
+  );
+}
+
 export function UndoIcon({ size, ...props }: IconProps) {
   const resolved = resolveSize(size, 16);
   return (
