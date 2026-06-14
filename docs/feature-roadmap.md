@@ -163,8 +163,9 @@ the same controls render in the desktop rail flyout and mobile inspector.
 2. ~~**#4 render PNG + #5 video**~~ — DONE (Capture menu; offscreen CaptureStage +
    useSceneCapture render a clean active-camera view to PNG / WebM).
 3. ~~**#3 GLB export**~~ — DONE (Capture menu → Export model; client-side
-   GLTFExporter on the offscreen CaptureStage graph. Static pose only — animation
-   baking, plus camera/fov which don't map to glTF, are a follow-up).
+   GLTFExporter on the offscreen CaptureStage graph). Keyframe animation is now
+   baked into a sampled AnimationClip (euler→quaternion); camera/fov tracks don't
+   map to glTF and are dropped.
 4. ~~**#11 presets + #10 group/ungroup**~~ — DONE (material preset chips plus
    transform-preserving group/ungroup actions).
 5. ~~**#6 image-to-scene**~~ — DONE (composer reference-image picker/drop zone;

@@ -129,7 +129,7 @@ export function ExportMenu({ hasAnimation, busy, onRenderImage, onExportVideo, o
               <button className={styles.item} disabled={busy} onClick={onExportModel}>
                 {busy ? "Working…" : "↓ Export model (GLB)"}
               </button>
-              <div style={hintStyle}>Geometry, materials &amp; lights at the current pose.</div>
+              <div style={hintStyle}>Geometry, materials, lights{hasAnimation ? " & baked animation" : ""}.</div>
             </div>,
             document.body
           )

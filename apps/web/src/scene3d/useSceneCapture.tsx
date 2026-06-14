@@ -7,9 +7,9 @@
 // (JSX to mount) and `status` (progress text for an overlay), plus the triggers.
 
 import { useCallback, useRef, useState, type ReactNode } from "react";
-import type * as THREE from "three";
+import * as THREE from "three";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
-import { animationDuration, type Scene3D } from "@ai-threejs-studio/scene3d";
+import { animationDuration, findNode, normalizeTransform, sampleTrack, type Animation, type Scene3D } from "@ai-threejs-studio/scene3d";
 import { CaptureStage } from "./CaptureStage";
 
 export interface CaptureResolution {
@@ -66,13 +66,16 @@ export function useSceneCapture(scene: Scene3D | null, playhead: number, fileBas
 
   // GLB export reads the constructed scene graph (no rendering needed) and runs
   // the glTF binary exporter. Skips the capture camera so the file carries only
-  // the scene's own nodes/lights. Animation is NOT baked yet — static pose export.
+  // the scene's own nodes/lights. Keyframe animation is baked into a sampled
+  // AnimationClip (glTF stores quaternion rotations, so euler tracks are sampled
+  // to quaternions); camera/fov tracks don't map to glTF and are dropped.
   const onScene = useCallback(
     (threeScene: THREE.Scene) => {
       if (!job || job.kind !== "glb") return;
       window.setTimeout(() => {
         setStatus("Exporting model…");
         try {
+          const clip = scene ? bakeAnimationClip(scene) : null;
           new GLTFExporter().parse(
             threeScene,
             (gltf) => {
@@ -80,14 +83,14 @@ export function useSceneCapture(scene: Scene3D | null, playhead: number, fileBas
               finish(job);
             },
             (error) => finish(job, new Error(error?.message ?? "glTF export failed.")),
-            { binary: true, onlyVisible: true }
+            { binary: true, onlyVisible: true, animations: clip ? [clip] : [] }
           );
         } catch (error) {
           finish(job, asError(error));
         }
       }, GLB_WARMUP_MS);
     },
-    [job, fileBase, finish]
+    [job, fileBase, finish, scene]
   );
 
   const onReady = useCallback(
@@ -207,6 +210,90 @@ export function useSceneCapture(scene: Scene3D | null, playhead: number, fileBas
     ) : null;
 
   return { renderImage, exportVideo, exportModel, stage, status, busy: job !== null };
+}
+
+// Bakes the scene's keyframe animation into a single THREE AnimationClip for GLB
+// export. Each animated node's TRS is sampled at a fixed rate over the duration
+// (so per-keyframe easing is approximated by dense samples, and euler rotation
+// tracks become quaternion keyframes — glTF only stores quaternions). Camera
+// tracks are skipped (no glTF camera-animation equivalent here).
+const BAKE_FPS = 30;
+
+function bakeAnimationClip(scene: Scene3D): THREE.AnimationClip | null {
+  const anim = scene.animation;
+  if (!anim || anim.tracks.length === 0) return null;
+  const duration = animationDuration(anim);
+  if (duration <= 0) return null;
+
+  const steps = Math.max(2, Math.round(duration * BAKE_FPS));
+  const times: number[] = [];
+  for (let i = 0; i <= steps; i++) times.push(Math.min((i / steps) * duration, duration));
+
+  // Animated targets that resolve to real nodes (skip camera ids).
+  const nodeIds = new Set<string>();
+  for (const track of anim.tracks) if (findNode(scene.nodes, track.targetId)) nodeIds.add(track.targetId);
+  if (nodeIds.size === 0) return null;
+
+  const tracks: THREE.KeyframeTrack[] = [];
+  const euler = new THREE.Euler();
+  const quat = new THREE.Quaternion();
+
+  for (const id of nodeIds) {
+    const node = findNode(scene.nodes, id);
+    if (!node) continue;
+    const base = normalizeTransform(node.transform);
+    const animates = (prefix: string) =>
+      anim.tracks.some((t) => t.targetId === id && (t.property === prefix || t.property.startsWith(`${prefix}.`)));
+    const pos = animates("position");
+    const rot = animates("rotation");
+    const scale = animates("scale");
+    if (!pos && !rot && !scale) continue;
+
+    const posValues: number[] = [];
+    const rotValues: number[] = [];
+    const scaleValues: number[] = [];
+    for (const t of times) {
+      if (pos) {
+        posValues.push(
+          sampleCh(anim, id, "position.x", t, base.position[0]),
+          sampleCh(anim, id, "position.y", t, base.position[1]),
+          sampleCh(anim, id, "position.z", t, base.position[2])
+        );
+      }
+      if (rot) {
+        euler.set(
+          sampleCh(anim, id, "rotation.x", t, base.rotation[0]),
+          sampleCh(anim, id, "rotation.y", t, base.rotation[1]),
+          sampleCh(anim, id, "rotation.z", t, base.rotation[2])
+        );
+        quat.setFromEuler(euler);
+        rotValues.push(quat.x, quat.y, quat.z, quat.w);
+      }
+      if (scale) {
+        // Uniform "scale" track first, then per-axis overrides (matches playback).
+        const uniform = sampleChOpt(anim, id, "scale", t);
+        const sx = sampleCh(anim, id, "scale.x", t, uniform ?? base.scale[0]);
+        const sy = sampleCh(anim, id, "scale.y", t, uniform ?? base.scale[1]);
+        const sz = sampleCh(anim, id, "scale.z", t, uniform ?? base.scale[2]);
+        scaleValues.push(sx, sy, sz);
+      }
+    }
+    if (pos) tracks.push(new THREE.VectorKeyframeTrack(`${id}.position`, times, posValues));
+    if (rot) tracks.push(new THREE.QuaternionKeyframeTrack(`${id}.quaternion`, times, rotValues));
+    if (scale) tracks.push(new THREE.VectorKeyframeTrack(`${id}.scale`, times, scaleValues));
+  }
+
+  return tracks.length > 0 ? new THREE.AnimationClip(scene.metadata.name || "animation", duration, tracks) : null;
+}
+
+function sampleCh(anim: Animation, id: string, property: string, time: number, fallback: number): number {
+  const value = sampleChOpt(anim, id, property, time);
+  return value === undefined ? fallback : value;
+}
+
+function sampleChOpt(anim: Animation, id: string, property: string, time: number): number | undefined {
+  const track = anim.tracks.find((t) => t.targetId === id && t.property === property);
+  return track ? sampleTrack(track, time) : undefined;
 }
 
 function pickVideoMime(): string | null {
