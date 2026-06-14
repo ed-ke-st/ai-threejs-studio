@@ -134,6 +134,15 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   const [gizmoSnap, setGizmoSnap] = useState(() => loadGizmoPrefs().snap);
   const [gizmoMoreOpen, setGizmoMoreOpen] = useState(false); // mobile: reveal World/Local + Snap
   const [inspectorCollapsed, setInspectorCollapsed] = useState(() => loadInspectorCollapsed());
+  // Left aside (prompt + layers): collapsible to reclaim canvas, and width-resizable
+  // by dragging its right edge. Both persisted editor-wide. Desktop only — on mobile
+  // the panel is a full-width switched tab.
+  const [leftCollapsed, setLeftCollapsed] = useState(() => loadLeftCollapsed());
+  const [leftWidth, setLeftWidth] = useState<number | null>(() => loadLeftWidth());
+  const leftResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  // The floating scene-tools dock (World / Camera / Capture) collapses to a single
+  // button in both layouts.
+  const [dockCollapsed, setDockCollapsed] = useState(() => loadDockCollapsed());
   const isWide = useMinWidth(1181); // desktop — where the collapsible inspector rail makes sense
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Tracks whether cmd/ctrl is held, so a click in the 3D canvas (where React
@@ -825,6 +834,35 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     saveTimelineOpen(timelineOpen);
   }, [timelineOpen]);
 
+  // Persist the left-aside collapse/width + scene-tools dock collapse (editor-wide).
+  useEffect(() => {
+    saveLeftCollapsed(leftCollapsed);
+  }, [leftCollapsed]);
+  useEffect(() => {
+    saveLeftWidth(leftWidth);
+  }, [leftWidth]);
+  useEffect(() => {
+    saveDockCollapsed(dockCollapsed);
+  }, [dockCollapsed]);
+
+  // Drag the left aside's right edge to resize it (clamped); persisted on release.
+  const startLeftResize = (event: React.PointerEvent) => {
+    event.preventDefault();
+    leftResizeRef.current = { startX: event.clientX, startWidth: leftWidth ?? DEFAULT_LEFT_WIDTH };
+    const onMove = (e: PointerEvent) => {
+      const ctx = leftResizeRef.current;
+      if (!ctx) return;
+      setLeftWidth(Math.max(MIN_LEFT_WIDTH, Math.min(MAX_LEFT_WIDTH, ctx.startWidth + (e.clientX - ctx.startX))));
+    };
+    const onUp = () => {
+      leftResizeRef.current = null;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
   const selectedNode = useMemo(() => (scene && primaryId ? findNode(scene.nodes, primaryId) : null), [scene, primaryId]);
   // The visible outliner rows: a depth-tagged walk that stops descending into
   // collapsed groups, so children of a collapsed group are hidden.
@@ -1092,7 +1130,25 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
 
 
       <div className={styles.body}>
-        <aside className={mobileAsideClass(`${styles.panel} ${styles.panelLeft}`, mobilePanel !== "inspector")}>
+        {/* Collapsed left aside (desktop): a thin reveal rail to bring it back. */}
+        {isWide && leftCollapsed ? (
+          <button className={styles.leftReveal} onClick={() => setLeftCollapsed(false)} title="Show prompt & layers" aria-label="Show prompt and layers panel">
+            ▸
+          </button>
+        ) : null}
+        <aside
+          className={mobileAsideClass(`${styles.panel} ${styles.panelLeft}${isWide && leftCollapsed ? ` ${styles.panelLeftCollapsed}` : ""}`, mobilePanel !== "inspector")}
+          style={isWide && !leftCollapsed && leftWidth ? { width: leftWidth, minWidth: leftWidth } : undefined}
+        >
+          {/* Desktop: collapse button + drag-to-resize handle on the right edge. */}
+          {isWide ? (
+            <>
+              <button className={styles.leftCollapseBtn} onClick={() => setLeftCollapsed(true)} title="Hide panel" aria-label="Hide prompt and layers panel">
+                ◂
+              </button>
+              <div className={styles.leftResizeHandle} onPointerDown={startLeftResize} role="separator" aria-label="Resize panel" title="Drag to resize" />
+            </>
+          ) : null}
           <div className={mobileSectionClass(styles.composer, mobilePanel === "compose")}>
             <div className={styles.mobilePanelHeader}>
               <div className={styles.mobilePanelHandle} />
@@ -1503,35 +1559,48 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
           </div>
 
           <div className={styles.sceneToolsDock} aria-label="Scene tools">
-            <SceneSettingsMenu
-              background={scene.background}
-              fog={scene.fog}
-              environment={scene.environment}
-              postprocessing={scene.postprocessing}
-              onPatch={patchScene}
-            />
-            <CameraMenu
-              cameras={cameras}
-              activeCameraId={activeCamera.id}
-              lookThrough={lookThrough}
-              onSelect={selectCamera}
-              onAdd={addCamera}
-              onDelete={deleteCamera}
-              onRename={renameCamera}
-              onPatch={patchCamera}
-              onFrameFromView={frameCameraFromView}
-              onSetLookThrough={setLookThrough}
-              onKeyPose={keyCameraPose}
-              onKeyLens={keyCameraLens}
-              playhead={playhead}
-            />
-            <ExportMenu
-              hasAnimation={(scene.animation?.tracks.length ?? 0) > 0}
-              busy={capture.busy}
-              onRenderImage={(res) => runCapture(capture.renderImage(res))}
-              onExportVideo={(res, fps) => runCapture(capture.exportVideo(res, fps))}
-              onExportModel={() => runCapture(capture.exportModel())}
-            />
+            <button
+              className={styles.dockToggle}
+              onClick={() => setDockCollapsed((v) => !v)}
+              title={dockCollapsed ? "Show scene tools" : "Hide scene tools"}
+              aria-label={dockCollapsed ? "Show scene tools" : "Hide scene tools"}
+              aria-expanded={!dockCollapsed}
+            >
+              {dockCollapsed ? "☰" : "✕"}
+            </button>
+            {!dockCollapsed ? (
+              <>
+                <SceneSettingsMenu
+                  background={scene.background}
+                  fog={scene.fog}
+                  environment={scene.environment}
+                  postprocessing={scene.postprocessing}
+                  onPatch={patchScene}
+                />
+                <CameraMenu
+                  cameras={cameras}
+                  activeCameraId={activeCamera.id}
+                  lookThrough={lookThrough}
+                  onSelect={selectCamera}
+                  onAdd={addCamera}
+                  onDelete={deleteCamera}
+                  onRename={renameCamera}
+                  onPatch={patchCamera}
+                  onFrameFromView={frameCameraFromView}
+                  onSetLookThrough={setLookThrough}
+                  onKeyPose={keyCameraPose}
+                  onKeyLens={keyCameraLens}
+                  playhead={playhead}
+                />
+                <ExportMenu
+                  hasAnimation={(scene.animation?.tracks.length ?? 0) > 0}
+                  busy={capture.busy}
+                  onRenderImage={(res) => runCapture(capture.renderImage(res))}
+                  onExportVideo={(res, fps) => runCapture(capture.exportVideo(res, fps))}
+                  onExportModel={() => runCapture(capture.exportModel())}
+                />
+              </>
+            ) : null}
           </div>
 
           <Canvas shadows camera={{ position: activeCamera.position ?? [3.4, 2.6, 4.4], fov: activeCamera.fov ?? 45 }} onPointerMissed={() => setSelectedIds([])}>
@@ -2009,6 +2078,60 @@ function saveTimelineOpen(value: boolean): void {
     localStorage.setItem(TIMELINE_OPEN_KEY, value ? "1" : "0");
   } catch {
     // localStorage unavailable — preference just won't persist.
+  }
+}
+
+// Left-aside sizing bounds (desktop). Width persists across sessions.
+const DEFAULT_LEFT_WIDTH = 280;
+const MIN_LEFT_WIDTH = 230;
+const MAX_LEFT_WIDTH = 460;
+
+const LEFT_COLLAPSED_KEY = "s3d:leftCollapsed";
+const LEFT_WIDTH_KEY = "s3d:leftWidth";
+const DOCK_COLLAPSED_KEY = "s3d:dockCollapsed";
+
+function loadLeftCollapsed(): boolean {
+  try {
+    return localStorage.getItem(LEFT_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function saveLeftCollapsed(value: boolean): void {
+  try {
+    localStorage.setItem(LEFT_COLLAPSED_KEY, value ? "1" : "0");
+  } catch {
+    /* localStorage unavailable */
+  }
+}
+function loadLeftWidth(): number | null {
+  try {
+    const raw = Number(localStorage.getItem(LEFT_WIDTH_KEY));
+    return Number.isFinite(raw) && raw > 0 ? Math.max(MIN_LEFT_WIDTH, Math.min(MAX_LEFT_WIDTH, raw)) : null;
+  } catch {
+    return null;
+  }
+}
+function saveLeftWidth(value: number | null): void {
+  try {
+    if (value === null) localStorage.removeItem(LEFT_WIDTH_KEY);
+    else localStorage.setItem(LEFT_WIDTH_KEY, String(Math.round(value)));
+  } catch {
+    /* localStorage unavailable */
+  }
+}
+function loadDockCollapsed(): boolean {
+  try {
+    return localStorage.getItem(DOCK_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function saveDockCollapsed(value: boolean): void {
+  try {
+    localStorage.setItem(DOCK_COLLAPSED_KEY, value ? "1" : "0");
+  } catch {
+    /* localStorage unavailable */
   }
 }
 

@@ -379,6 +379,11 @@ export function Timeline(props: TimelineProps) {
           resize.current = null;
         }}
       />
+      {/* Always-visible collapse control, pinned top-right so it's reachable even
+          when the transport row scrolls horizontally (mobile). */}
+      <button className={styles.collapsePin} onClick={props.onToggleOpen} title="Collapse timeline" aria-label="Collapse timeline">
+        ▾
+      </button>
       <div className={styles.transport}>
         <button className={styles.iconBtn} onClick={props.onPlayPause} title={playing ? "Pause" : "Play"} aria-label={playing ? "Pause" : "Play"}>
           {playing ? "⏸" : "▶"}
@@ -449,10 +454,6 @@ export function Timeline(props: TimelineProps) {
             + Scale
           </button>
         </div>
-
-        <button className={styles.toggleBtn} onClick={props.onToggleOpen} title="Close timeline" style={{ marginLeft: 4 }}>
-          ▾
-        </button>
       </div>
 
       <div className={styles.scrubArea}>
