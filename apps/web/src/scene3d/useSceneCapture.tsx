@@ -6,7 +6,7 @@
 // Both share one CaptureStage (a clean offscreen canvas). The hook returns `stage`
 // (JSX to mount) and `status` (progress text for an overlay), plus the triggers.
 
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { animationDuration, findNode, normalizeTransform, sampleTrack, type Animation, type Scene3D } from "@ai-threejs-studio/scene3d";
@@ -55,6 +55,20 @@ export function useSceneCapture(scene: Scene3D | null, playhead: number, fileBas
   const [videoTime, setVideoTime] = useState(0);
   const [status, setStatus] = useState<string | null>(null);
   const rafRef = useRef<number | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+
+  // Stop an in-flight capture if the editor unmounts mid-export (switching to the
+  // runtime surface or another project) — otherwise the rAF loop and recorder keep
+  // running against a detached canvas and emit a truncated file.
+  useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      if (recorderRef.current && recorderRef.current.state !== "inactive") {
+        recorderRef.current.onstop = null;
+        recorderRef.current.stop();
+      }
+    };
+  }, []);
 
   const finish = useCallback((current: Job, error?: Error) => {
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
@@ -118,11 +132,13 @@ export function useSceneCapture(scene: Scene3D | null, playhead: number, fileBas
       }
       const stream = canvas.captureStream(job.fps);
       const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 12_000_000 });
+      recorderRef.current = recorder;
       const chunks: Blob[] = [];
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunks.push(e.data);
       };
       recorder.onstop = () => {
+        recorderRef.current = null;
         try {
           triggerBlob(new Blob(chunks, { type: mime }), `${fileBase}.webm`);
           finish(job);
