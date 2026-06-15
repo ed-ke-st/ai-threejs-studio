@@ -1,4 +1,7 @@
 import type {
+  AdminBillingOrder,
+  AdminCreditLookup,
+  AdminProfile,
   AppSettings,
   AppSettingsUpdate,
   BillingOrder,
@@ -51,6 +54,9 @@ interface ProjectState {
   share: ProjectShare | null;
   settings: AppSettings | null;
   billing: BillingStatus | null;
+  admin: AdminProfile | null;
+  adminOrders: AdminBillingOrder[];
+  adminCreditLookup: AdminCreditLookup | null;
   busy: boolean;
   /** Transient confirmation message (e.g. a finished download), auto-dismissed by the UI. */
   toast: string | null;
@@ -73,6 +79,10 @@ interface ProjectState {
   loadBilling: () => Promise<void>;
   createBillingOrder: (packageId: string) => Promise<BillingOrder>;
   captureBillingOrder: (orderId: string) => Promise<void>;
+  loadAdmin: () => Promise<void>;
+  loadAdminOrders: (filters?: { status?: string; userId?: string; limit?: number }) => Promise<void>;
+  loadAdminCredits: (userId: string) => Promise<void>;
+  clearAdminCreditLookup: () => void;
   fetchModels: (provider: "openai" | "anthropic") => Promise<string[]>;
   usage: UsageSnapshot | null;
   loadUsage: () => Promise<void>;
@@ -96,6 +106,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   share: null,
   settings: null,
   billing: null,
+  admin: null,
+  adminOrders: [],
+  adminCreditLookup: null,
   usage: null,
   logs: [],
   busy: false,
@@ -286,6 +299,34 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const data = await api<{ order: BillingOrder; billing: BillingStatus }>(`/billing/orders/${orderId}/capture`, { method: "POST" });
     set({ billing: data.billing, statusMessage: "Credits added", toast: `${data.order.package.credits} credits added` });
     void get().loadUsage();
+  },
+
+  async loadAdmin() {
+    try {
+      const data = await api<{ admin: AdminProfile }>("/admin/me");
+      set({ admin: data.admin });
+    } catch {
+      set({ admin: null, adminOrders: [], adminCreditLookup: null });
+    }
+  },
+
+  async loadAdminOrders(filters = {}) {
+    const query = new URLSearchParams();
+    if (filters.status) query.set("status", filters.status);
+    if (filters.userId) query.set("userId", filters.userId);
+    if (filters.limit) query.set("limit", String(filters.limit));
+    const suffix = query.toString() ? `?${query}` : "";
+    const data = await api<{ orders: AdminBillingOrder[] }>(`/admin/billing/orders${suffix}`);
+    set({ adminOrders: data.orders, statusMessage: "Admin orders loaded" });
+  },
+
+  async loadAdminCredits(userId) {
+    const data = await api<AdminCreditLookup>(`/admin/billing/users/${encodeURIComponent(userId)}/credits?limit=100`);
+    set({ adminCreditLookup: data, statusMessage: "User credits loaded" });
+  },
+
+  clearAdminCreditLookup() {
+    set({ adminCreditLookup: null });
   },
 
   async fetchModels(provider) {

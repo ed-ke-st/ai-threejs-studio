@@ -247,3 +247,47 @@ export interface BillingOrder {
   approvalUrl: string;
   package: CreditPackage;
 }
+
+export interface AdminProfile {
+  id: string;
+  role: "user" | "admin";
+  displayName: string | null;
+}
+
+export interface AdminBillingOrder {
+  id: string;
+  userId: string;
+  packageId: string;
+  credits: number;
+  amountCents: number;
+  currency: string;
+  paypalOrderId: string;
+  paypalCaptureId: string | null;
+  status: string;
+  approvalUrl: string | null;
+  creditedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminCreditLedgerEntry {
+  id: string;
+  creditType: "paid" | "bonus";
+  amount: number;
+  reason: string;
+  referenceId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface AdminCreditLookup {
+  userId: string;
+  balance: {
+    paid: number;
+    bonus: number;
+    total: number;
+    bonusGrantedAt: string | null;
+    updatedAt: string | null;
+  };
+  ledger: AdminCreditLedgerEntry[];
+}

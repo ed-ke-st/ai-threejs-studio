@@ -5,7 +5,7 @@ import { ProjectMenu } from "./ProjectMenu";
 import { ProjectToolbar } from "./ProjectToolbar";
 import { CloseIcon, SettingsIcon } from "./ui/icons";
 import { authEnabled, supabase } from "./auth/supabaseClient";
-import { MODEL_CHOICES, type AppSettingsUpdate } from "@ai-threejs-studio/shared";
+import { MODEL_CHOICES, type AdminBillingOrder, type AppSettingsUpdate } from "@ai-threejs-studio/shared";
 import styles from "./App.module.css";
 
 export function App() {
@@ -18,16 +18,20 @@ export function App() {
   const previewFrameKey = useProjectStore((s) => s.previewFrameKey);
   const isPreviewStarting = useProjectStore((s) => s.isPreviewStarting);
   const buildResult = useProjectStore((s) => s.buildResult);
+  const admin = useProjectStore((s) => s.admin);
 
   const checkHealth = useProjectStore((s) => s.checkHealth);
   const loadProjects = useProjectStore((s) => s.loadProjects);
   const loadSettings = useProjectStore((s) => s.loadSettings);
   const loadUsage = useProjectStore((s) => s.loadUsage);
   const loadBilling = useProjectStore((s) => s.loadBilling);
+  const loadAdmin = useProjectStore((s) => s.loadAdmin);
   const createProject = useProjectStore((s) => s.createProject);
   const startPreview = useProjectStore((s) => s.startPreview);
 
-  const [showSettings, setShowSettings] = useState(false);
+  const [panel, setPanel] = useState<"app" | "settings" | "admin">("app");
+  const showSettings = panel === "settings";
+  const showAdmin = panel === "admin";
 
   useEffect(() => {
     void checkHealth();
@@ -35,14 +39,15 @@ export function App() {
     void loadSettings();
     void loadUsage();
     void loadBilling();
-  }, [checkHealth, loadProjects, loadSettings, loadUsage, loadBilling]);
+    void loadAdmin();
+  }, [checkHealth, loadProjects, loadSettings, loadUsage, loadBilling, loadAdmin]);
 
   // Auto-start the preview when the Runtime surface is opened with no running
   // preview. The ref guards against retry storms if a start fails (it resets when
   // you leave runtime, so re-entering tries again).
   const autoStartedRef = useRef(false);
   useEffect(() => {
-    if (previewSurface !== "runtime" || showSettings) {
+    if (previewSurface !== "runtime" || panel !== "app") {
       autoStartedRef.current = false;
       return;
     }
@@ -53,7 +58,7 @@ export function App() {
       autoStartedRef.current = true;
       void startPreview();
     }
-  }, [previewSurface, showSettings, preview, isPreviewStarting, startPreview]);
+  }, [previewSurface, panel, preview, isPreviewStarting, startPreview]);
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null;
 
@@ -70,8 +75,13 @@ export function App() {
         </div>
 
         <div className={styles.topbarRight}>
-          {selectedProject && !showSettings ? <ProjectToolbar /> : null}
-          <button className={styles.ghost} onClick={() => setShowSettings((v) => !v)}>
+          {selectedProject && panel === "app" ? <ProjectToolbar /> : null}
+          {admin ? (
+            <button className={panel === "admin" ? `${styles.ghost} ${styles.ghostActive}` : styles.ghost} onClick={() => setPanel((current) => (current === "admin" ? "app" : "admin"))}>
+              Admin
+            </button>
+          ) : null}
+          <button className={showSettings ? `${styles.ghost} ${styles.ghostActive}` : styles.ghost} onClick={() => setPanel((current) => (current === "settings" ? "app" : "settings"))}>
             {showSettings ? <CloseIcon /> : <SettingsIcon />}
           </button>
           {authEnabled ? (
@@ -85,7 +95,9 @@ export function App() {
 
 
       <main className={styles.main}>
-        {showSettings ? (
+        {showAdmin ? (
+          <AdminPanel />
+        ) : showSettings ? (
           <SettingsPanel />
         ) : !selectedProject ? (
           <div className={styles.empty}>
@@ -348,6 +360,192 @@ function SettingsPanel() {
       </label>
     </div>
   );
+}
+
+function AdminPanel() {
+  const admin = useProjectStore((s) => s.admin);
+  const orders = useProjectStore((s) => s.adminOrders);
+  const creditLookup = useProjectStore((s) => s.adminCreditLookup);
+  const loadAdminOrders = useProjectStore((s) => s.loadAdminOrders);
+  const loadAdminCredits = useProjectStore((s) => s.loadAdminCredits);
+  const clearAdminCreditLookup = useProjectStore((s) => s.clearAdminCreditLookup);
+  const logError = useProjectStore((s) => s.logError);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [userFilter, setUserFilter] = useState("");
+  const [creditUserId, setCreditUserId] = useState("");
+  const [loadingOrders, setLoadingOrders] = useState(false);
+  const [loadingCredits, setLoadingCredits] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!admin) return;
+    setLoadingOrders(true);
+    void loadAdminOrders({ limit: 50 })
+      .catch((e) => {
+        const message = e instanceof Error ? e.message : String(e);
+        setError(message);
+        logError("Couldn’t load admin orders", message);
+      })
+      .finally(() => setLoadingOrders(false));
+  }, [admin, loadAdminOrders, logError]);
+
+  const refreshOrders = async () => {
+    setError(null);
+    setLoadingOrders(true);
+    try {
+      await loadAdminOrders({ limit: 50, status: statusFilter.trim() || undefined, userId: userFilter.trim() || undefined });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      logError("Couldn’t load admin orders", message);
+    } finally {
+      setLoadingOrders(false);
+    }
+  };
+
+  const lookupCredits = async () => {
+    const id = creditUserId.trim();
+    if (!id) return;
+    setError(null);
+    setLoadingCredits(true);
+    try {
+      await loadAdminCredits(id);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      logError("Couldn’t load user credits", message);
+    } finally {
+      setLoadingCredits(false);
+    }
+  };
+
+  if (!admin) {
+    return (
+      <div className={styles.adminPanel}>
+        <h2 className={styles.settingsTitle}>Admin</h2>
+        <p className={styles.adminMuted}>Admin access is not available for this account.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.adminPanel}>
+      <div className={styles.adminHeader}>
+        <div>
+          <h2 className={styles.settingsTitle}>Admin</h2>
+          <p className={styles.adminMuted}>Signed in as {admin.displayName ?? admin.id}</p>
+        </div>
+        <button className={styles.ghost} type="button" onClick={() => void refreshOrders()} disabled={loadingOrders}>
+          {loadingOrders ? "Loading…" : "Refresh"}
+        </button>
+      </div>
+
+      {error ? (
+        <details className={styles.settingsError} open>
+          <summary>Admin request failed — show details</summary>
+          <pre>{error}</pre>
+        </details>
+      ) : null}
+
+      <section className={styles.adminCard}>
+        <div className={styles.adminSectionHeader}>
+          <div>
+            <strong>Billing orders</strong>
+            <span>Read-only PayPal order overview.</span>
+          </div>
+          <span>{orders.length} shown</span>
+        </div>
+        <div className={styles.adminFilters}>
+          <input className={styles.input} placeholder="Status, e.g. COMPLETED" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} />
+          <input className={styles.input} placeholder="User UUID" value={userFilter} onChange={(e) => setUserFilter(e.target.value)} />
+          <button className={styles.primary} type="button" onClick={() => void refreshOrders()} disabled={loadingOrders}>
+            Apply
+          </button>
+        </div>
+        <div className={styles.adminTableWrap}>
+          <table className={styles.adminTable}>
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Package</th>
+                <th>Credits</th>
+                <th>Amount</th>
+                <th>User</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orders.length ? orders.map((order) => <AdminOrderRow key={order.id} order={order} onInspectUser={(id) => setCreditUserId(id)} />) : (
+                <tr>
+                  <td colSpan={6}>No orders found.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className={styles.adminCard}>
+        <div className={styles.adminSectionHeader}>
+          <div>
+            <strong>User credits</strong>
+            <span>Lookup a user balance and recent credit ledger.</span>
+          </div>
+          {creditLookup ? <button className={styles.ghost} type="button" onClick={clearAdminCreditLookup}>Clear</button> : null}
+        </div>
+        <div className={styles.adminFilters}>
+          <input className={styles.input} placeholder="User UUID" value={creditUserId} onChange={(e) => setCreditUserId(e.target.value)} />
+          <button className={styles.primary} type="button" onClick={() => void lookupCredits()} disabled={loadingCredits || !creditUserId.trim()}>
+            {loadingCredits ? "Loading…" : "Lookup"}
+          </button>
+        </div>
+        {creditLookup ? (
+          <>
+            <div className={styles.adminBalanceGrid}>
+              <span><strong>{creditLookup.balance.total}</strong>Total</span>
+              <span><strong>{creditLookup.balance.paid}</strong>Paid</span>
+              <span><strong>{creditLookup.balance.bonus}</strong>Bonus</span>
+            </div>
+            <div className={styles.adminLedger}>
+              {creditLookup.ledger.length ? creditLookup.ledger.map((entry) => (
+                <div key={entry.id} className={styles.adminLedgerRow}>
+                  <strong>{entry.amount > 0 ? `+${entry.amount}` : entry.amount}</strong>
+                  <span>{entry.creditType} · {entry.reason}</span>
+                  <small>{entry.referenceId ?? "no reference"} · {formatDate(entry.createdAt)}</small>
+                </div>
+              )) : <p className={styles.adminMuted}>No ledger entries.</p>}
+            </div>
+          </>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+function AdminOrderRow({ order, onInspectUser }: { order: AdminBillingOrder; onInspectUser: (userId: string) => void }) {
+  return (
+    <tr>
+      <td><span className={styles.adminStatus}>{order.status}</span></td>
+      <td>{order.packageId}</td>
+      <td>{order.credits}</td>
+      <td>{(order.amountCents / 100).toLocaleString(undefined, { style: "currency", currency: order.currency })}</td>
+      <td>
+        <button className={styles.adminLinkButton} type="button" onClick={() => onInspectUser(order.userId)} title={order.userId}>
+          {shortId(order.userId)}
+        </button>
+      </td>
+      <td>{formatDate(order.createdAt)}</td>
+    </tr>
+  );
+}
+
+function shortId(id: string): string {
+  return id.length > 12 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id;
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return "—";
+  return new Date(value).toLocaleString();
 }
 
 function healthBadgeClass(health: "checking" | "connected" | "offline"): string {
