@@ -33,6 +33,14 @@ SUPABASE_SERVICE_ROLE_KEY=<service_role or sb_secret_…>   # only for admin/tes
 ALLOW_PLATFORM_KEYS=false                                  # false = BYO-only (recommended)
 QUOTA_AGENT_RUNS_PER_DAY=100
 QUOTA_BUILDS_PER_DAY=200
+# optional: prepaid platform credits (requires ALLOW_PLATFORM_KEYS=true)
+FREE_GENERATION_CREDITS=3
+PAYPAL_ENVIRONMENT=sandbox                                # sandbox | live
+PAYPAL_CLIENT_ID=<PayPal REST app client id>
+PAYPAL_CLIENT_SECRET=<PayPal REST app secret>
+PAYPAL_WEBHOOK_ID=<PayPal webhook id>
+# optional package override JSON:
+# CREDIT_PACKAGES_JSON=[{"id":"starter","label":"Starter","credits":20,"amountCents":500,"currency":"USD"}]
 ```
 
 Notes / gotchas:
@@ -52,10 +60,14 @@ Notes / gotchas:
 DB=$(grep -E '^SUPABASE_DB_URL=' .env | cut -d= -f2-)
 psql "$DB" -v ON_ERROR_STOP=1 --single-transaction -f supabase/migrations/0001_init_accounts.sql
 psql "$DB" -v ON_ERROR_STOP=1 --single-transaction -f supabase/migrations/0002_user_settings.sql
+psql "$DB" -v ON_ERROR_STOP=1 --single-transaction -f supabase/migrations/0003_storage_metadata.sql
+psql "$DB" -v ON_ERROR_STOP=1 --single-transaction -f supabase/migrations/0004_billing_credits.sql
+psql "$DB" -v ON_ERROR_STOP=1 --single-transaction -f supabase/migrations/0005_admin_roles.sql
 # verify
 psql "$DB" -tAc "select tablename, rowsecurity from pg_tables where schemaname='public' order by 1;"
 ```
-Expect: profiles, project_shares, projects, usage_quota, user_settings — all `rowsecurity=t`.
+Expect: credit_balances, credit_ledger, paypal_orders, profiles, project_assets,
+project_shares, projects, usage_quota, user_settings — all `rowsecurity=t`.
 
 ## 4. Create the owner account
 
@@ -69,6 +81,24 @@ psql "$DB" -tAc "select id from auth.users where email='$EMAIL';"   # -> BACKFIL
 ```
 
 (Alternative: turn off "Confirm email" in Auth settings while developing.)
+
+## 4b. Promote the owner account to admin
+
+App admin authorization lives in `public.profiles.role`, not Supabase `auth.users`.
+Promote only trusted owner/support accounts:
+
+```bash
+DB=$(grep -E '^SUPABASE_DB_URL=' .env | cut -d= -f2-)
+OWNER_ID=<owner uuid>
+psql "$DB" -v ON_ERROR_STOP=1 -c "update public.profiles set role='admin' where id='$OWNER_ID';"
+psql "$DB" -tAc "select id, display_name, role from public.profiles where id='$OWNER_ID';"
+```
+
+Admin-only API endpoints currently available:
+
+- `GET /admin/me`
+- `GET /admin/billing/orders?limit=50&status=COMPLETED`
+- `GET /admin/billing/users/<user uuid>/credits?limit=100`
 
 ## 5. Backfill existing single-tenant projects
 
@@ -114,8 +144,16 @@ Local JSON repo + no login return; existing projects reappear.
 - **BYO keys:** with `ALLOW_PLATFORM_KEYS=false`, every user (including you) must enter
   their own provider key in the app **Settings** panel — the server `.env` keys are
   ignored in multi-tenant mode. Stored AES-256-GCM encrypted under their account.
-- **Test tokens later:** set `ALLOW_PLATFORM_KEYS=true` and lower `QUOTA_*` to let
-  keyless users run on the platform key, capped per user/day.
+- **Platform credits:** set `ALLOW_PLATFORM_KEYS=true`, configure at least one platform
+  model key, and configure the PayPal REST app credentials above. Users can choose
+  **Platform credits** in Settings or fall back to credits automatically when they do
+  not have a provider key. One generated variation costs one credit.
+- **PayPal webhooks:** subscribe the webhook to `PAYMENT.CAPTURE.COMPLETED`. Also
+  subscribe `CHECKOUT.ORDER.APPROVED`, `PAYMENT.CAPTURE.REFUNDED`,
+  `PAYMENT.CAPTURE.REVERSED`, `CUSTOMER.DISPUTE.CREATED`, and
+  `CUSTOMER.DISPUTE.RESOLVED` for status visibility and reconciliation. Webhooks
+  are a backup for users who approve PayPal but do not return to click
+  **Complete purchase**.
 - **Still single-instance:** project files live on the local disk and preview/quota
   session state assumes one API process. Object storage + moving preview state out of
   memory are required before horizontal scaling. The live preview runner is not yet

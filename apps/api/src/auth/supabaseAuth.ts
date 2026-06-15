@@ -14,6 +14,7 @@ function isPublic(url: string): boolean {
   const path = url.split("?")[0];
   return (
     path === "/health" ||
+    path === "/billing/paypal/webhook" ||
     path === "/shares" ||
     path.startsWith("/shares/") ||
     path.startsWith("/preview/") // token-gated runtime preview (loaded in an iframe)

@@ -23,6 +23,7 @@ export function App() {
   const loadProjects = useProjectStore((s) => s.loadProjects);
   const loadSettings = useProjectStore((s) => s.loadSettings);
   const loadUsage = useProjectStore((s) => s.loadUsage);
+  const loadBilling = useProjectStore((s) => s.loadBilling);
   const createProject = useProjectStore((s) => s.createProject);
   const startPreview = useProjectStore((s) => s.startPreview);
 
@@ -33,7 +34,8 @@ export function App() {
     void loadProjects();
     void loadSettings();
     void loadUsage();
-  }, [checkHealth, loadProjects, loadSettings, loadUsage]);
+    void loadBilling();
+  }, [checkHealth, loadProjects, loadSettings, loadUsage, loadBilling]);
 
   // Auto-start the preview when the Runtime surface is opened with no running
   // preview. The ref guards against retry storms if a start fails (it resets when
@@ -158,6 +160,9 @@ function ModelRow({ label, value, options, onChange }: { label: string; value: s
 function SettingsPanel() {
   const settings = useProjectStore((s) => s.settings);
   const updateSettings = useProjectStore((s) => s.updateSettings);
+  const billing = useProjectStore((s) => s.billing);
+  const createBillingOrder = useProjectStore((s) => s.createBillingOrder);
+  const captureBillingOrder = useProjectStore((s) => s.captureBillingOrder);
   const logError = useProjectStore((s) => s.logError);
   const fetchModels = useProjectStore((s) => s.fetchModels);
   const [openAiKey, setOpenAiKey] = useState("");
@@ -166,6 +171,10 @@ function SettingsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [openAiModels, setOpenAiModels] = useState<string[]>([]);
   const [anthropicModels, setAnthropicModels] = useState<string[]>([]);
+  const [pendingOrder, setPendingOrder] = useState<{ id: string; label: string; credits: number } | null>(null);
+  const [buying, setBuying] = useState<string | null>(null);
+  const activeBilling = billing?.credits.enabled ? billing : null;
+  const platformCreditsEnabled = Boolean(activeBilling);
 
   // Pull the models each key actually has access to (falls back to MODEL_CHOICES).
   const hasOpenAi = settings?.hasOpenAiApiKey;
@@ -186,6 +195,42 @@ function SettingsPanel() {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
       logError("Couldn’t save settings", message);
+    }
+  };
+
+  const buyCredits = async (packageId: string) => {
+    setError(null);
+    setBuying(packageId);
+    const checkoutWindow = window.open("about:blank", "_blank");
+    if (checkoutWindow) checkoutWindow.opener = null;
+    try {
+      const order = await createBillingOrder(packageId);
+      setPendingOrder({ id: order.id, label: order.package.label, credits: order.package.credits });
+      if (checkoutWindow) {
+        checkoutWindow.location.href = order.approvalUrl;
+      } else {
+        window.open(order.approvalUrl, "_blank", "noopener,noreferrer");
+      }
+    } catch (e) {
+      checkoutWindow?.close();
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      logError("Couldn’t start PayPal checkout", message);
+    } finally {
+      setBuying(null);
+    }
+  };
+
+  const captureCredits = async () => {
+    if (!pendingOrder) return;
+    setError(null);
+    try {
+      await captureBillingOrder(pendingOrder.id);
+      setPendingOrder(null);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      logError("Couldn’t complete PayPal checkout", message);
     }
   };
 
@@ -210,6 +255,53 @@ function SettingsPanel() {
           <option value="gemini">Gemini</option>
         </select>
       </label>
+
+      <label className={styles.settingRow}>
+        <span>AI usage source</span>
+        <select className={styles.input} value={settings?.aiUsageSource ?? "auto"} onChange={(e) => void save({ aiUsageSource: e.target.value as "auto" | "platform" })}>
+          <option value="auto">Auto — own key first</option>
+          <option value="platform" disabled={!platformCreditsEnabled}>
+            Platform credits
+          </option>
+        </select>
+      </label>
+
+      {activeBilling ? (
+        <section className={styles.billingCard}>
+          <div className={styles.billingHeader}>
+            <div>
+              <strong>Platform credits</strong>
+              <span>Use these when you do not want to add your own provider key.</span>
+            </div>
+            <div className={styles.creditTotal}>
+              <strong>{activeBilling.credits.total}</strong>
+              <span>credits</span>
+            </div>
+          </div>
+          <div className={styles.creditBreakdown}>
+            <span>Paid {activeBilling.credits.paid}</span>
+            <span>Bonus {activeBilling.credits.bonus}</span>
+          </div>
+          <div className={styles.packageGrid}>
+            {activeBilling.packages.map((pack) => (
+              <button key={pack.id} className={styles.packageCard} type="button" disabled={Boolean(buying)} onClick={() => void buyCredits(pack.id)}>
+                <strong>{pack.label}</strong>
+                <span>{pack.credits} credits</span>
+                <em>{(pack.amountCents / 100).toLocaleString(undefined, { style: "currency", currency: pack.currency })}</em>
+                <small>{buying === pack.id ? "Opening PayPal…" : "Buy with PayPal"}</small>
+              </button>
+            ))}
+          </div>
+          {pendingOrder ? (
+            <div className={styles.pendingOrder}>
+              <span>Approved {pendingOrder.label} in PayPal?</span>
+              <button className={styles.primary} type="button" onClick={() => void captureCredits()}>
+                Complete purchase
+              </button>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <label className={styles.settingRow}>
         <span>OpenAI API key {settings?.hasOpenAiApiKey ? "✓ set" : ""}</span>

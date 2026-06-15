@@ -7,6 +7,7 @@ import { createProjectRepository } from "./projects.js";
 import { registerAuth } from "./auth/supabaseAuth.js";
 import { createSettingsRepository } from "./settings.js";
 import { createUsageService } from "./usage.js";
+import { createBillingService } from "./billing.js";
 import { getBlobStore } from "./storage/blobStore.js";
 import { closeSql } from "./db.js";
 import { PreviewRunner } from "./preview/previewRunner.js";
@@ -47,6 +48,7 @@ registerAuth(app);
 
 const settingsRepository = await createSettingsRepository();
 const usageService = createUsageService();
+const billingService = createBillingService();
 await getBlobStore().init();
 
 const projectRepository = await createProjectRepository();
@@ -75,7 +77,8 @@ registerRoutes(
   projectExportService,
   assetLibrary,
   settingsRepository,
-  usageService
+  usageService,
+  billingService
 );
 
 process.once("SIGINT", () => {

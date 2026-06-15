@@ -12,7 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ENVIRONMENT_PRESETS, type EnvironmentPreset, type PostProcessing, type Scene3D } from "@ai-threejs-studio/scene3d";
 import styles from "./AddObjectMenu.module.css";
-import { SettingsIcon } from "../ui/icons";
+import { SettingsIcon, WorldIcon } from "../ui/icons";
 
 export interface SceneSettingsMenuProps {
   background?: string;
@@ -87,7 +87,7 @@ export function SceneSettingsMenu({ background, fog, environment, postprocessing
         title="World & render settings"
         aria-label="World & render settings"
       >
-        <SettingsIcon size={14} />
+        <WorldIcon size={14} />
         <span className={styles.addLabel}>World</span>
       </button>
       {open && coords

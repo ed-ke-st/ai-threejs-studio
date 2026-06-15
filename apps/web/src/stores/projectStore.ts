@@ -1,6 +1,8 @@
 import type {
   AppSettings,
   AppSettingsUpdate,
+  BillingOrder,
+  BillingStatus,
   BuildResult,
   PreviewSession,
   Project,
@@ -24,6 +26,7 @@ export interface QuotaSnapshot {
 export interface UsageSnapshot {
   agentRun: QuotaSnapshot;
   build: QuotaSnapshot;
+  credits: BillingStatus["credits"];
 }
 
 export interface LogEntry {
@@ -47,6 +50,7 @@ interface ProjectState {
   isBuilding: boolean;
   share: ProjectShare | null;
   settings: AppSettings | null;
+  billing: BillingStatus | null;
   busy: boolean;
   /** Transient confirmation message (e.g. a finished download), auto-dismissed by the UI. */
   toast: string | null;
@@ -66,6 +70,9 @@ interface ProjectState {
   exportBuildArchive: () => Promise<void>;
   loadSettings: () => Promise<void>;
   updateSettings: (patch: AppSettingsUpdate) => Promise<void>;
+  loadBilling: () => Promise<void>;
+  createBillingOrder: (packageId: string) => Promise<BillingOrder>;
+  captureBillingOrder: (orderId: string) => Promise<void>;
   fetchModels: (provider: "openai" | "anthropic") => Promise<string[]>;
   usage: UsageSnapshot | null;
   loadUsage: () => Promise<void>;
@@ -88,6 +95,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isBuilding: false,
   share: null,
   settings: null,
+  billing: null,
   usage: null,
   logs: [],
   busy: false,
@@ -253,6 +261,31 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       body: JSON.stringify(patch)
     });
     set({ settings: data.settings, statusMessage: "Settings saved" });
+  },
+
+  async loadBilling() {
+    try {
+      const billing = await api<BillingStatus>("/billing/status");
+      set({ billing });
+    } catch {
+      // Billing is optional in single-tenant/dev mode.
+    }
+  },
+
+  async createBillingOrder(packageId) {
+    const data = await api<{ order: BillingOrder }>("/billing/orders", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ packageId })
+    });
+    set({ statusMessage: "PayPal order created" });
+    return data.order;
+  },
+
+  async captureBillingOrder(orderId) {
+    const data = await api<{ order: BillingOrder; billing: BillingStatus }>(`/billing/orders/${orderId}/capture`, { method: "POST" });
+    set({ billing: data.billing, statusMessage: "Credits added", toast: `${data.order.package.credits} credits added` });
+    void get().loadUsage();
   },
 
   async fetchModels(provider) {

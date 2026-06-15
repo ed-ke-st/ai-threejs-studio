@@ -80,6 +80,7 @@
   font-size: 12px;
   text-align: left;
   cursor: pointer;
+  justify-content: flex-start;
 }
 
 .item:hover {

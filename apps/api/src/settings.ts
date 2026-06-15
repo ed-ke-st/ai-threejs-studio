@@ -8,6 +8,7 @@ import { decryptSecret, encryptSecret } from "./crypto.js";
 
 export interface StoredAppSettings {
   aiProvider: AppSettings["aiProvider"];
+  aiUsageSource: AppSettings["aiUsageSource"];
   geminiApiKey: string;
   openAiApiKey: string;
   anthropicApiKey: string;
@@ -29,6 +30,7 @@ export interface SettingsRepository {
 
 const EMPTY: StoredAppSettings = {
   aiProvider: "auto",
+  aiUsageSource: "auto",
   geminiApiKey: "",
   openAiApiKey: "",
   anthropicApiKey: "",
@@ -41,6 +43,7 @@ const EMPTY: StoredAppSettings = {
 function toAppSettings(settings: StoredAppSettings): AppSettings {
   return {
     aiProvider: settings.aiProvider,
+    aiUsageSource: settings.aiUsageSource,
     hasGeminiApiKey: Boolean(settings.geminiApiKey),
     hasOpenAiApiKey: Boolean(settings.openAiApiKey),
     hasAnthropicApiKey: Boolean(settings.anthropicApiKey),
@@ -104,6 +107,7 @@ export class LocalSettingsRepository implements SettingsRepository {
   async updateSettings(_userId: string, patch: AppSettingsUpdate): Promise<AppSettings> {
     this.storedSettings = {
       aiProvider: patch.aiProvider ?? this.storedSettings.aiProvider,
+      aiUsageSource: patch.aiUsageSource ?? this.storedSettings.aiUsageSource,
       geminiApiKey: applyKey(this.storedSettings.geminiApiKey, patch.geminiApiKey, patch.clearGeminiApiKey),
       openAiApiKey: applyKey(this.storedSettings.openAiApiKey, patch.openAiApiKey, patch.clearOpenAiApiKey),
       anthropicApiKey: applyKey(this.storedSettings.anthropicApiKey, patch.anthropicApiKey, patch.clearAnthropicApiKey),
@@ -131,6 +135,7 @@ export class LocalSettingsRepository implements SettingsRepository {
 
 interface UserSettingsRow {
   ai_provider: StoredAppSettings["aiProvider"];
+  ai_usage_source: StoredAppSettings["aiUsageSource"] | null;
   gemini_api_key: string | null;
   openai_api_key: string | null;
   anthropic_api_key: string | null;
@@ -167,12 +172,14 @@ export class PostgresSettingsRepository implements SettingsRepository {
   private async readOwn(userId: string): Promise<StoredAppSettings> {
     const [row] = await this.sql<UserSettingsRow[]>`
       select ai_provider, gemini_api_key, openai_api_key, anthropic_api_key,
+             ai_usage_source,
              anthropic_code_model, anthropic_repair_model, openai_code_model, openai_repair_model
       from user_settings where user_id = ${userId} limit 1
     `;
     if (!row) return { ...EMPTY };
     return {
       aiProvider: row.ai_provider,
+      aiUsageSource: row.ai_usage_source ?? "auto",
       geminiApiKey: this.decryptField(row.gemini_api_key),
       openAiApiKey: this.decryptField(row.openai_api_key),
       anthropicApiKey: this.decryptField(row.anthropic_api_key),
@@ -190,6 +197,14 @@ export class PostgresSettingsRepository implements SettingsRepository {
   async getStoredSettings(userId: string): Promise<StoredAppSettings> {
     const own = await this.readOwn(userId);
     if (!this.allowPlatformKeys) return own;
+    if (own.aiUsageSource === "platform") {
+      return {
+        ...own,
+        geminiApiKey: process.env.GEMINI_API_KEY || "",
+        openAiApiKey: process.env.OPENAI_API_KEY || "",
+        anthropicApiKey: process.env.ANTHROPIC_API_KEY || ""
+      };
+    }
     return {
       ...own,
       geminiApiKey: own.geminiApiKey || process.env.GEMINI_API_KEY || "",
@@ -202,6 +217,7 @@ export class PostgresSettingsRepository implements SettingsRepository {
     const current = await this.readOwn(userId);
     const next: StoredAppSettings = {
       aiProvider: patch.aiProvider ?? current.aiProvider,
+      aiUsageSource: patch.aiUsageSource ?? current.aiUsageSource,
       geminiApiKey: applyKey(current.geminiApiKey, patch.geminiApiKey, patch.clearGeminiApiKey),
       openAiApiKey: applyKey(current.openAiApiKey, patch.openAiApiKey, patch.clearOpenAiApiKey),
       anthropicApiKey: applyKey(current.anthropicApiKey, patch.anthropicApiKey, patch.clearAnthropicApiKey),
@@ -211,14 +227,15 @@ export class PostgresSettingsRepository implements SettingsRepository {
     const blank = (value: string): string | null => (value ? value : null);
     await this.sql`
       insert into user_settings (
-        user_id, ai_provider, gemini_api_key, openai_api_key, anthropic_api_key,
+        user_id, ai_provider, ai_usage_source, gemini_api_key, openai_api_key, anthropic_api_key,
         anthropic_code_model, anthropic_repair_model, openai_code_model, openai_repair_model, updated_at
       ) values (
-        ${userId}, ${next.aiProvider}, ${enc(next.geminiApiKey)}, ${enc(next.openAiApiKey)}, ${enc(next.anthropicApiKey)},
+        ${userId}, ${next.aiProvider}, ${next.aiUsageSource}, ${enc(next.geminiApiKey)}, ${enc(next.openAiApiKey)}, ${enc(next.anthropicApiKey)},
         ${blank(next.anthropicCodeModel)}, ${blank(next.anthropicRepairModel)}, ${blank(next.openAiCodeModel)}, ${blank(next.openAiRepairModel)}, now()
       )
       on conflict (user_id) do update set
         ai_provider = excluded.ai_provider,
+        ai_usage_source = excluded.ai_usage_source,
         gemini_api_key = excluded.gemini_api_key,
         openai_api_key = excluded.openai_api_key,
         anthropic_api_key = excluded.anthropic_api_key,

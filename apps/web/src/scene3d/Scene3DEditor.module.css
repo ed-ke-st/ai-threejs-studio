@@ -560,6 +560,7 @@
 .body {
   flex: 1;
   display: flex;
+  position: relative;
   min-height: 0;
 }
 
@@ -593,11 +594,11 @@
 }
 
 /* Right-edge controls live in a small gutter so they never overlap content. */
-@media (min-width: 1181px) {
+/* @media (min-width: 1181px) {
   .panelLeft {
     padding-right: 14px;
   }
-}
+} */
 
 .leftResizeHandle {
   position: absolute;
@@ -615,22 +616,26 @@
 
 .leftCollapseBtn {
   position: absolute;
-  top: 8px;
+  top: 0;
   right: 0;
   width: 14px;
-  height: 28px;
+  height: 24px;
   z-index: 4;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  background: rgba(20, 28, 40, 0.85);
-  border: 1px solid #243047;
-  border-radius: 4px 0 0 4px;
+  border-radius: 0 0 0 4px;
   color: #9fb2c8;
   font-size: 11px;
   cursor: pointer;
 }
+
+.leftCollapseBtn svg {
+  rotate: 90deg;
+
+}
+
 .leftCollapseBtn:hover {
   color: #e2e8f0;
   border-color: #3a4757;
@@ -639,7 +644,6 @@
 /* Thin reveal rail shown in place of the collapsed left aside. */
 .leftReveal {
   flex: 0 0 auto;
-  width: 16px;
   align-self: stretch;
   background: var(--c-bg-panel);
   border-right: 1px solid #15202f;
@@ -647,6 +651,10 @@
   font-size: 11px;
   cursor: pointer;
   padding: 0;
+}
+
+.leftReveal svg {
+  rotate: -90deg;
 }
 .leftReveal:hover {
   color: #e2e8f0;
@@ -677,8 +685,13 @@
    class is never applied at ≤1180 where the panel is full-width). overflow:visible
    lets the rail's hover labels spill out over the canvas without being clipped. */
 .panelRightCollapsed {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
   width: 56px;
-  min-width: 56px;
+  min-width: 0;
   overflow: visible;
 }
 
@@ -788,6 +801,7 @@
   font-size: 12px;
   background: transparent;
   color: #aab8cc;
+  justify-content: flex-start;
 }
 
 .outlineRow:hover {
@@ -927,6 +941,14 @@
   border-radius: var(--radius-md);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
   backdrop-filter: blur(8px);
+}
+
+
+/* When the inspector is collapsed to its 56px rail (absolutely positioned over the
+   right edge of the now-full-width canvas), shift the dock left so it clears the
+   rail instead of sliding behind it. */
+.sceneToolsDockInset {
+  right: 72px;
 }
 
 /* Collapse toggle for the scene-tools dock; sits at the dock's top-right. */
@@ -1074,6 +1096,11 @@
     min-height: 0;
   }
 
+  /* Dock collapsed: no panel is shown, so the canvas grows to fill the viewport. */
+  .bodyMobileCollapsed .canvasMain {
+    flex: 1 1 auto;
+  }
+
   .mobileAsideActive {
     flex: 1 1 0;
     min-height: 0;
@@ -1164,7 +1191,6 @@
 
   .sceneToolsDock {
     top: 62px;
-    left: 12px;
     right: 12px;
     width: auto;
     max-width: none;
@@ -1181,7 +1207,7 @@
 
   .mobileDock {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr) 44px;
     gap: 6px;
     /* Pinned to the bottom of the scrolling body; sits above panel content. */
     position: sticky;
@@ -1190,6 +1216,26 @@
     padding: 8px 10px max(8px, env(safe-area-inset-bottom));
     background: var(--c-bg-shell);
     border-top: 1px solid #15202f;
+  }
+
+  .mobileDockTabs {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .mobileDockCollapsed {
+    display: flex;
+    justify-content: flex-end;
+    pointer-events: none;
+    background: none;
+    border-top: 0;
+    padding-top: 18px;
+    margin-top: auto;
+    position: absolute;
+    right: 0;
+    bottom: 47px;
   }
 
   .mobileSection {
@@ -1276,6 +1322,40 @@
     background: #16314b;
     border-color: var(--c-accent);
     color: var(--c-text-selected);
+  }
+
+  .mobileDockToggle {
+    min-width: 44px;
+    min-height: 42px;
+    display: inline-grid;
+    place-items: center;
+    color: #9fb2c8;
+    background: linear-gradient(180deg, rgba(20, 30, 44, 0.96), rgba(9, 15, 24, 0.96));
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    cursor: pointer;
+  }
+
+  .mobileDockToggle:hover,
+  .mobileDockToggle:focus-visible {
+    color: var(--c-text-selected);
+    border-color: var(--c-accent);
+    outline: none;
+  }
+
+  .mobileDockToggleCollapsed {
+    pointer-events: auto;
+    width: 48px;
+    min-height: 44px;
+    border-radius: 999px;
+    background: rgba(10, 18, 29, 0.92);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.36);
+    backdrop-filter: blur(8px);
+  }
+
+  .mobileDockChevronUp {
+    transform: rotate(180deg);
   }
 
   .mobileCount {

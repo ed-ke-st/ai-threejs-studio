@@ -180,16 +180,17 @@
 .scrubArea {
   position: relative;
   overflow-y: auto;
-  padding: 6px 12px 12px;
   /* Fill whatever height the (possibly user-resized) panel provides. */
   flex: 1;
   min-height: 0;
 }
 
 .ruler {
-  position: relative;
+  position: sticky;
   height: 18px;
   margin-bottom: 4px;
+  top: 0;
+  z-index: 10;
 }
 .scrub {
   width: 100%;
@@ -201,6 +202,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  padding: .5rem;
 }
 .groupBlock {
   display: flex;

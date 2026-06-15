@@ -194,6 +194,7 @@ export const MODEL_CHOICES = {
 
 export interface AppSettings {
   aiProvider: "gemini" | "openai" | "claude" | "auto";
+  aiUsageSource: "auto" | "platform";
   hasGeminiApiKey: boolean;
   hasOpenAiApiKey: boolean;
   hasAnthropicApiKey: boolean;
@@ -206,6 +207,7 @@ export interface AppSettings {
 
 export interface AppSettingsUpdate {
   aiProvider?: "gemini" | "openai" | "claude" | "auto";
+  aiUsageSource?: "auto" | "platform";
   geminiApiKey?: string;
   openAiApiKey?: string;
   anthropicApiKey?: string;
@@ -216,4 +218,32 @@ export interface AppSettingsUpdate {
   anthropicRepairModel?: string;
   openAiCodeModel?: string;
   openAiRepairModel?: string;
+}
+
+export interface CreditPackage {
+  id: string;
+  label: string;
+  credits: number;
+  amountCents: number;
+  currency: string;
+}
+
+export interface CreditBalance {
+  enabled: boolean;
+  bonus: number;
+  paid: number;
+  total: number;
+}
+
+export interface BillingStatus {
+  credits: CreditBalance;
+  packages: CreditPackage[];
+}
+
+export interface BillingOrder {
+  id: string;
+  paypalOrderId: string;
+  status: string;
+  approvalUrl: string;
+  package: CreditPackage;
 }

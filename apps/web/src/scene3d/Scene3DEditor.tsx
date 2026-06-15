@@ -21,7 +21,7 @@ import { useSceneCapture } from "./useSceneCapture";
 import { Timeline } from "./Timeline";
 import { createNodeFromSpec, type AddSpec } from "./sceneFactory";
 import { composePrompt } from "./promptComposer";
-import { GroupIcon, MoveIcon, RedoIcon, RotateIcon, ScaleIcon, TrashIcon, UndoIcon, UngroupIcon } from "../ui/icons";
+import { GroupIcon, MoveIcon, RedoIcon, RotateIcon, ScaleIcon, TrashIcon, UndoIcon, UngroupIcon, ChevronDownIcon } from "../ui/icons";
 import { authHeaders } from "../auth/supabaseClient";
 import { useProjectStore } from "../stores/projectStore";
 import styles from "./Scene3DEditor.module.css";
@@ -129,6 +129,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("compose");
+  const [mobileDockCollapsed, setMobileDockCollapsed] = useState(() => loadMobileDockCollapsed());
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>(() => loadGizmoPrefs().mode);
   const [gizmoSpace, setGizmoSpace] = useState<"world" | "local">(() => loadGizmoPrefs().space);
   const [gizmoSnap, setGizmoSnap] = useState(() => loadGizmoPrefs().snap);
@@ -844,6 +845,9 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
   useEffect(() => {
     saveDockCollapsed(dockCollapsed);
   }, [dockCollapsed]);
+  useEffect(() => {
+    saveMobileDockCollapsed(mobileDockCollapsed);
+  }, [mobileDockCollapsed]);
 
   // Drag the left aside's right edge to resize it (clamped); persisted on release.
   const startLeftResize = (event: React.PointerEvent) => {
@@ -1129,22 +1133,22 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     <div className={styles.shell}>
 
 
-      <div className={styles.body}>
+      <div className={mobileDockCollapsed ? `${styles.body} ${styles.bodyMobileCollapsed}` : styles.body}>
         {/* Collapsed left aside (desktop): a thin reveal rail to bring it back. */}
         {isWide && leftCollapsed ? (
           <button className={styles.leftReveal} onClick={() => setLeftCollapsed(false)} title="Show prompt & layers" aria-label="Show prompt and layers panel">
-            ▸
+            <ChevronDownIcon size={18}/>
           </button>
         ) : null}
         <aside
-          className={mobileAsideClass(`${styles.panel} ${styles.panelLeft}${isWide && leftCollapsed ? ` ${styles.panelLeftCollapsed}` : ""}`, mobilePanel !== "inspector")}
+          className={mobileAsideClass(`${styles.panel} ${styles.panelLeft}${isWide && leftCollapsed ? ` ${styles.panelLeftCollapsed}` : ""}`, mobilePanel !== "inspector" && (isWide || !mobileDockCollapsed))}
           style={isWide && !leftCollapsed && leftWidth ? { width: leftWidth, minWidth: leftWidth } : undefined}
         >
           {/* Desktop: collapse button + drag-to-resize handle on the right edge. */}
           {isWide ? (
             <>
               <button className={styles.leftCollapseBtn} onClick={() => setLeftCollapsed(true)} title="Hide panel" aria-label="Hide prompt and layers panel">
-                ◂
+                <ChevronDownIcon size={16}/>
               </button>
               <div className={styles.leftResizeHandle} onPointerDown={startLeftResize} role="separator" aria-label="Resize panel" title="Drag to resize" />
             </>
@@ -1255,7 +1259,10 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
                 {usage && usage.agentRun.limit != null ? (
                   <span className={styles.usageHint}>
                     {Math.max(0, usage.agentRun.limit - usage.agentRun.used)}/{usage.agentRun.limit} generations left today
+                    {usage.credits.enabled ? ` · ${usage.credits.total} credits` : ""}
                   </span>
+                ) : usage?.credits.enabled ? (
+                  <span className={styles.usageHint}>{usage.credits.total} platform credits</span>
                 ) : null}
                 {generating && stage ? (
                   <span className={styles.progressPill}>
@@ -1558,7 +1565,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
             <AddObjectMenu onAdd={addObject} />
           </div>
 
-          <div className={styles.sceneToolsDock} aria-label="Scene tools">
+          <div className={paneCollapsed ? `${styles.sceneToolsDock} ${styles.sceneToolsDockInset}` : styles.sceneToolsDock} aria-label="Scene tools">
             <button
               className={styles.dockToggle}
               onClick={() => setDockCollapsed((v) => !v)}
@@ -1661,6 +1668,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
             playhead={playhead}
             playing={playing}
             selectedNode={selectedNode}
+            rightInset={paneCollapsed ? 66 : undefined}
             nodeName={nodeName}
             onToggleOpen={() => setTimelineOpen((v) => !v)}
             onPlayPause={togglePlay}
@@ -1684,7 +1692,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
         </main>
 
         <aside
-          className={mobileAsideClass(`${styles.panel} ${styles.panelRight}${paneCollapsed ? ` ${styles.panelRightCollapsed}` : ""}`, mobilePanel === "inspector")}
+          className={mobileAsideClass(`${styles.panel} ${styles.panelRight}${paneCollapsed ? ` ${styles.panelRightCollapsed}` : ""}`, mobilePanel === "inspector" && (isWide || !mobileDockCollapsed))}
         >
           <div className={mobileSectionClass(styles.inspectorPane, mobilePanel === "inspector")}>
             <div className={styles.mobilePanelHeader}>
@@ -1721,36 +1729,68 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
             </div>
           </div>
         </aside>
-
         {/* Mobile panel switcher — pinned to the bottom of the scrolling body so
             it stays reachable no matter how far you scroll into a panel. */}
-        <div className={styles.mobileDock} role="tablist" aria-label="Editor panels">
-          <button
-            type="button"
-            className={mobileTabClass(mobilePanel === "compose")}
-            onClick={() => setMobilePanel("compose")}
-            aria-selected={mobilePanel === "compose"}
-          >
-            <span>Prompt</span>
-          </button>
-          <button
-            type="button"
-            className={mobileTabClass(mobilePanel === "outliner")}
-            onClick={() => setMobilePanel("outliner")}
-            aria-selected={mobilePanel === "outliner"}
-          >
-            <span>Layers</span>
-            <span className={styles.mobileCount}>{visibleRows.length}</span>
-          </button>
-          <button
-            type="button"
-            className={mobileTabClass(mobilePanel === "inspector")}
-            onClick={() => setMobilePanel("inspector")}
-            aria-selected={mobilePanel === "inspector"}
-          >
-            <span>Inspector</span>
-            {selectedIds.length > 0 ? <span className={styles.mobileCount}>{selectedIds.length}</span> : null}
-          </button>
+        <div
+          className={mobileDockCollapsed ? `${styles.mobileDock} ${styles.mobileDockCollapsed}` : styles.mobileDock}
+          aria-label={mobileDockCollapsed ? "Collapsed editor panels" : "Editor panels"}
+        >
+          {mobileDockCollapsed ? (
+            <button
+              type="button"
+              className={`${styles.mobileDockToggle} ${styles.mobileDockToggleCollapsed}`}
+              onClick={() => setMobileDockCollapsed(false)}
+              aria-label="Expand editor panels"
+              aria-expanded={false}
+              title="Expand editor panels"
+            >
+              <ChevronDownIcon className={styles.mobileDockChevronUp} size={16} />
+            </button>
+          ) : (
+            <>
+              <div className={styles.mobileDockTabs} role="tablist" aria-label="Editor panels">
+                <button
+                  type="button"
+                  role="tab"
+                  className={mobileTabClass(mobilePanel === "compose")}
+                  onClick={() => setMobilePanel("compose")}
+                  aria-selected={mobilePanel === "compose"}
+                >
+                  <span>Prompt</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  className={mobileTabClass(mobilePanel === "outliner")}
+                  onClick={() => setMobilePanel("outliner")}
+                  aria-selected={mobilePanel === "outliner"}
+                >
+                  <span>Layers</span>
+                  <span className={styles.mobileCount}>{visibleRows.length}</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  className={mobileTabClass(mobilePanel === "inspector")}
+                  onClick={() => setMobilePanel("inspector")}
+                  aria-selected={mobilePanel === "inspector"}
+                >
+                  <span>Inspector</span>
+                  {selectedIds.length > 0 ? <span className={styles.mobileCount}>{selectedIds.length}</span> : null}
+                </button>
+              </div>
+              <button
+                type="button"
+                className={styles.mobileDockToggle}
+                onClick={() => setMobileDockCollapsed(true)}
+                aria-label="Collapse editor panels"
+                aria-expanded={true}
+                title="Collapse editor panels"
+              >
+                <ChevronDownIcon size={16} />
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -2089,6 +2129,7 @@ const MAX_LEFT_WIDTH = 460;
 const LEFT_COLLAPSED_KEY = "s3d:leftCollapsed";
 const LEFT_WIDTH_KEY = "s3d:leftWidth";
 const DOCK_COLLAPSED_KEY = "s3d:dockCollapsed";
+const MOBILE_DOCK_COLLAPSED_KEY = "s3d:mobileDockCollapsed";
 
 function loadLeftCollapsed(): boolean {
   try {
@@ -2116,6 +2157,21 @@ function saveLeftWidth(value: number | null): void {
   try {
     if (value === null) localStorage.removeItem(LEFT_WIDTH_KEY);
     else localStorage.setItem(LEFT_WIDTH_KEY, String(Math.round(value)));
+  } catch {
+    /* localStorage unavailable */
+  }
+}
+
+function loadMobileDockCollapsed(): boolean {
+  try {
+    return localStorage.getItem(MOBILE_DOCK_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function saveMobileDockCollapsed(value: boolean): void {
+  try {
+    localStorage.setItem(MOBILE_DOCK_COLLAPSED_KEY, value ? "1" : "0");
   } catch {
     /* localStorage unavailable */
   }

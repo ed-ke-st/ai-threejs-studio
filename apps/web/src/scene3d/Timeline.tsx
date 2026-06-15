@@ -10,6 +10,7 @@
 import { useRef, useState } from "react";
 import type { AnimatableProperty, Animation, AnimationTrack, SceneNode } from "@ai-threejs-studio/scene3d";
 import styles from "./Timeline.module.css";
+import { AnimationIcon } from "../ui/icons";
 
 const PROPERTY_LABEL: Record<string, string> = {
   "position.x": "Position X", "position.y": "Position Y", "position.z": "Position Z",
@@ -29,6 +30,9 @@ export interface TimelineProps {
   playhead: number;
   playing: boolean;
   selectedNode: SceneNode | null;
+  /** Pull the panel's right edge in by this many px so it clears the inspector's
+   *  collapsed rail (which floats over the right edge of the full-width canvas). */
+  rightInset?: number;
   nodeName: (id: string) => string;
   onToggleOpen: () => void;
   onPlayPause: () => void;
@@ -182,9 +186,10 @@ export function Timeline(props: TimelineProps) {
   // play/scrub stay usable while the track lanes are tucked away.
   if (!open) {
     return (
-      <div className={styles.miniBar}>
+      <div className={styles.miniBar} style={props.rightInset ? { right: props.rightInset } : undefined}>
         <button className={styles.toggleBtn} onClick={props.onToggleOpen} title="Open animation timeline">
-          ▸ Animation{tracks.length > 0 ? ` (${tracks.length})` : ""}
+          <AnimationIcon size={16} />
+          {tracks.length > 0 ? ` (${tracks.length})` : ""}
         </button>
         {tracks.length > 0 ? (
           <>
@@ -355,7 +360,7 @@ export function Timeline(props: TimelineProps) {
   };
 
   return (
-    <div className={styles.timeline} style={height !== null ? { height: clampHeight(height) } : undefined}>
+    <div className={styles.timeline} style={{ ...(height !== null ? { height: clampHeight(height) } : null), ...(props.rightInset ? { right: props.rightInset } : null) }}>
       <div
         className={styles.resizeHandle}
         title="Drag to resize"

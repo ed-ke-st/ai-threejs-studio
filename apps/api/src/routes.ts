@@ -18,10 +18,13 @@ import type { ProjectExportService } from "./export/projectExport.js";
 import type { ProjectRepository } from "./projects.js";
 import type { SettingsRepository } from "./settings.js";
 import type { QuotaStatus, UsageService } from "./usage.js";
+import type { BillingService, CreditReservation } from "./billing.js";
+import { requireAdmin } from "./admin.js";
 import type { PreviewRunner } from "./preview/previewRunner.js";
 import type { LocalRagService } from "./rag/localRagService.js";
 import type { ProjectStorage } from "./storage/localWorkspaceStorage.js";
 import { getBlobStore, putDir } from "./storage/blobStore.js";
+import { getSql } from "./db.js";
 
 const createProjectSchema = z.object({
   name: z.string().min(1).default("Untitled Project"),
@@ -123,6 +126,7 @@ const sceneObjectPatchSchema = sceneObjectSchema
 
 const appSettingsSchema = z.object({
   aiProvider: z.enum(["gemini", "openai", "claude", "auto"]).optional(),
+  aiUsageSource: z.enum(["auto", "platform"]).optional(),
   geminiApiKey: z.string().optional(),
   openAiApiKey: z.string().optional(),
   anthropicApiKey: z.string().optional(),
@@ -136,6 +140,20 @@ const appSettingsSchema = z.object({
   openAiCodeModel: z.string().max(100).optional(),
   openAiRepairModel: z.string().max(100).optional()
 });
+
+const adminOrdersQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  status: z.string().min(1).max(80).optional(),
+  userId: z.string().uuid().optional()
+});
+
+const adminCreditsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).optional()
+});
+
+const billingOrderLimiter = new Map<string, { count: number; resetAt: number }>();
+const BILLING_ORDER_LIMIT = 5;
+const BILLING_ORDER_WINDOW_MS = 10 * 60 * 1000;
 
 // Short-lived capability token so the preview can load in an <iframe> (which can't
 // send an Authorization header). Owner access is checked when the URL is minted;
@@ -162,6 +180,18 @@ function verifyPreviewToken(projectId: string, token: string): boolean {
   }
 }
 
+function checkBillingOrderLimit(userId: string): { retryAfterMs: number } | null {
+  const now = Date.now();
+  const current = billingOrderLimiter.get(userId);
+  if (!current || current.resetAt <= now) {
+    billingOrderLimiter.set(userId, { count: 1, resetAt: now + BILLING_ORDER_WINDOW_MS });
+    return null;
+  }
+  if (current.count >= BILLING_ORDER_LIMIT) return { retryAfterMs: current.resetAt - now };
+  current.count += 1;
+  return null;
+}
+
 export function registerRoutes(
   app: FastifyInstance,
   storage: ProjectStorage,
@@ -171,7 +201,8 @@ export function registerRoutes(
   projectExportService: ProjectExportService,
   assetLibrary: ProjectAssetLibrary,
   settingsRepository: SettingsRepository,
-  usageService: UsageService
+  usageService: UsageService,
+  billingService: BillingService
 ): void {
   const blobStore = getBlobStore();
 
@@ -278,6 +309,7 @@ export function registerRoutes(
       return reply.code(400).send({ error: "A prompt is required." });
     }
 
+    const publicSettings = await settingsRepository.getSettings(request.userId);
     const settings = await settingsRepository.getStoredSettings(request.userId);
     // Keys come resolved from the settings repo: single-tenant merges env keys;
     // multi-tenant returns the user's own keys (plus the platform env keys only
@@ -314,6 +346,10 @@ export function registerRoutes(
     }
 
     const variationCount = body.data.mode === "refine" ? 1 : body.data.variationCount ?? 1;
+    const shouldUsePlatformCredits =
+      config.auth.enabled &&
+      config.auth.allowPlatformKeys &&
+      (publicSettings.aiUsageSource === "platform" || (useClaude ? !publicSettings.hasAnthropicApiKey : !publicSettings.hasOpenAiApiKey));
 
     // Per-user daily quota (no-op single-tenant). Counts the attempt before the
     // expensive run; must happen before reply.hijack() so we can still send 429.
@@ -325,6 +361,16 @@ export function registerRoutes(
         return reply.code(429).send({ error: `Daily generation limit reached (${quota.limit}/day). Try again tomorrow.` });
       }
       consumedRuns += 1;
+    }
+
+    let creditReservation: CreditReservation | null = null;
+    if (shouldUsePlatformCredits) {
+      try {
+        creditReservation = await billingService.consume(request.userId, variationCount, "agent-run");
+      } catch (error) {
+        for (let j = 0; j < consumedRuns; j += 1) await usageService.refund(request.userId, "agentRun").catch(() => {});
+        return reply.code(402).send({ error: error instanceof Error ? error.message : "Not enough platform credits." });
+      }
     }
 
     const retrievedContext = await ragService.searchDocs({
@@ -410,6 +456,7 @@ export function registerRoutes(
     } catch (error) {
       // A failed or cancelled run shouldn't count against the daily quota.
       for (let i = 0; i < consumedRuns; i += 1) await usageService.refund(request.userId, "agentRun").catch(() => {});
+      if (creditReservation) await billingService.refund(request.userId, creditReservation).catch(() => {});
       write({ type: "error", message: error instanceof Error ? error.message : "Generation failed." });
     } finally {
       clearInterval(heartbeat);
@@ -466,11 +513,119 @@ export function registerRoutes(
     }
   });
 
+  app.get("/billing/packages", async () => ({
+    packages: billingService.packages()
+  }));
+
+  app.get("/billing/status", async (request) => billingService.status(request.userId));
+
+  app.post("/billing/orders", async (request, reply) => {
+    const limited = checkBillingOrderLimit(request.userId);
+    if (limited) {
+      reply.header("retry-after", String(Math.ceil(limited.retryAfterMs / 1000)));
+      return reply.code(429).send({ error: "Too many checkout attempts. Try again shortly." });
+    }
+    const body = z.object({ packageId: z.string().min(1) }).safeParse(request.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: "A packageId is required." });
+    try {
+      return { order: await billingService.createPayPalOrder(request.userId, body.data.packageId) };
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : "Could not create PayPal order." });
+    }
+  });
+
+  app.post("/billing/orders/:orderId/capture", async (request, reply) => {
+    const { orderId } = request.params as { orderId: string };
+    try {
+      return { order: await billingService.capturePayPalOrder(request.userId, orderId), billing: await billingService.status(request.userId) };
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : "Could not capture PayPal order." });
+    }
+  });
+
+  app.post("/billing/paypal/webhook", async (request, reply) => {
+    try {
+      await billingService.handlePayPalWebhook(request.headers, request.body);
+      return { ok: true };
+    } catch (error) {
+      request.log.warn({ error }, "PayPal webhook rejected");
+      return reply.code(400).send({ error: "Invalid PayPal webhook." });
+    }
+  });
+
+  app.get("/admin/me", async (request, reply) => {
+    const admin = await requireAdmin(request.userId, reply);
+    if (!admin) return;
+    return { admin };
+  });
+
+  app.get("/admin/billing/orders", async (request, reply) => {
+    const admin = await requireAdmin(request.userId, reply);
+    if (!admin) return;
+    if (!config.supabaseDbUrl) return reply.code(400).send({ error: "Admin billing requires SUPABASE_DB_URL." });
+    const parsed = adminOrdersQuerySchema.safeParse(request.query ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "Invalid admin billing query." });
+    const { limit = 50, status, userId } = parsed.data;
+    const statusFilter = status ?? null;
+    const userFilter = userId ?? null;
+    const sql = getSql();
+    const rows = await sql<AdminPayPalOrderRow[]>`
+      select id, user_id, package_id, credits, amount_cents, currency,
+             paypal_order_id, paypal_capture_id, status, approval_url,
+             credited_at, created_at, updated_at
+      from paypal_orders
+      where (${statusFilter}::text is null or status = ${statusFilter})
+        and (${userFilter}::uuid is null or user_id = ${userFilter})
+      order by created_at desc
+      limit ${limit}
+    `;
+    return { orders: rows.map(adminOrderRow) };
+  });
+
+  app.get("/admin/billing/users/:userId/credits", async (request, reply) => {
+    const admin = await requireAdmin(request.userId, reply);
+    if (!admin) return;
+    if (!config.supabaseDbUrl) return reply.code(400).send({ error: "Admin billing requires SUPABASE_DB_URL." });
+    const { userId } = request.params as { userId: string };
+    const parsedParams = z.string().uuid().safeParse(userId);
+    if (!parsedParams.success) return reply.code(400).send({ error: "Invalid user id." });
+    const parsedQuery = adminCreditsQuerySchema.safeParse(request.query ?? {});
+    if (!parsedQuery.success) return reply.code(400).send({ error: "Invalid admin credits query." });
+    const sql = getSql();
+    const [balance] = await sql<{ paid_credits: number; bonus_credits: number; bonus_granted_at: string | null; updated_at: string }[]>`
+      select paid_credits, bonus_credits, bonus_granted_at, updated_at
+      from credit_balances
+      where user_id = ${parsedParams.data}
+      limit 1
+    `;
+    const ledger = await sql<AdminCreditLedgerRow[]>`
+      select id, credit_type, amount, reason, reference_id, metadata, created_at
+      from credit_ledger
+      where user_id = ${parsedParams.data}
+      order by created_at desc
+      limit ${parsedQuery.data.limit ?? 100}
+    `;
+    const paid = balance ? Number(balance.paid_credits) : 0;
+    const bonus = balance ? Number(balance.bonus_credits) : 0;
+    return {
+      userId: parsedParams.data,
+      balance: {
+        paid,
+        bonus,
+        total: paid + bonus,
+        bonusGrantedAt: balance?.bonus_granted_at ?? null,
+        updatedAt: balance?.updated_at ?? null
+      },
+      ledger: ledger.map(adminLedgerRow)
+    };
+  });
+
   // Today's per-user usage vs limits (null limit = unlimited / single-tenant).
   app.get("/usage", async (request) => {
     const usage = await usageService.status(request.userId);
+    const billing = await billingService.status(request.userId);
     const clean = (s: QuotaStatus) => ({ used: s.used, limit: Number.isFinite(s.limit) ? s.limit : null, allowed: s.allowed });
-    return { usage: { agentRun: clean(usage.agentRun), build: clean(usage.build) } };
+    return { usage: { agentRun: clean(usage.agentRun), build: clean(usage.build), credits: billing.credits } };
   });
 
   app.post("/docs/search", async (request) => {
@@ -844,6 +999,62 @@ function shareContentType(file: string): string {
   if (file.endsWith(".glb")) return "model/gltf-binary";
   if (file.endsWith(".wasm")) return "application/wasm";
   return "application/octet-stream";
+}
+
+interface AdminPayPalOrderRow {
+  id: string;
+  user_id: string;
+  package_id: string;
+  credits: number;
+  amount_cents: number;
+  currency: string;
+  paypal_order_id: string;
+  paypal_capture_id: string | null;
+  status: string;
+  approval_url: string | null;
+  credited_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface AdminCreditLedgerRow {
+  id: string;
+  credit_type: "paid" | "bonus";
+  amount: number;
+  reason: string;
+  reference_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+function adminOrderRow(row: AdminPayPalOrderRow) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    packageId: row.package_id,
+    credits: Number(row.credits),
+    amountCents: Number(row.amount_cents),
+    currency: row.currency,
+    paypalOrderId: row.paypal_order_id,
+    paypalCaptureId: row.paypal_capture_id,
+    status: row.status,
+    approvalUrl: row.approval_url,
+    creditedAt: row.credited_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function adminLedgerRow(row: AdminCreditLedgerRow) {
+  return {
+    id: row.id,
+    creditType: row.credit_type,
+    amount: Number(row.amount),
+    reason: row.reason,
+    referenceId: row.reference_id,
+    metadata: row.metadata,
+    createdAt: row.created_at
+  };
 }
 
 function normalizeSnapshotLabel(label: string | undefined): string | null {

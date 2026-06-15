@@ -511,6 +511,123 @@
   font-size: 12px;
 }
 
+.billingCard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 4px 0 18px;
+  padding: 14px;
+  border: 1px solid #21324a;
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at top left, rgba(31, 111, 235, 0.18), transparent 46%),
+    rgba(10, 18, 29, 0.68);
+}
+
+.billingHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.billingHeader div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.billingHeader strong {
+  font-size: 13px;
+}
+
+.billingHeader span,
+.creditBreakdown,
+.pendingOrder {
+  color: var(--c-text-muted);
+  font-size: 11px;
+}
+
+.creditTotal {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 70px;
+}
+
+.creditTotal strong {
+  color: var(--c-text-selected);
+  font-size: 24px;
+  line-height: 1;
+}
+
+.creditBreakdown {
+  display: flex;
+  gap: 8px;
+}
+
+.creditBreakdown span {
+  border: 1px solid #26364a;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.packageGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.packageCard {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid #26364a;
+  border-radius: var(--radius);
+  background: rgba(8, 14, 24, 0.68);
+  color: var(--c-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.packageCard:hover:not(:disabled) {
+  border-color: var(--c-accent);
+  background: rgba(22, 49, 75, 0.45);
+}
+
+.packageCard:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.packageCard strong {
+  font-size: 12px;
+}
+
+.packageCard span,
+.packageCard small {
+  color: var(--c-text-muted);
+  font-size: 11px;
+}
+
+.packageCard em {
+  color: var(--c-accent-cyan);
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.pendingOrder {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--c-border-soft);
+}
+
 .healthBadge {
   font-size: 11px;
   border-radius: 999px;
@@ -591,6 +708,20 @@
 
   .toolbar {
     gap: 6px;
+  }
+
+  .billingHeader,
+  .pendingOrder {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .creditTotal {
+    align-items: flex-start;
+  }
+
+  .packageGrid {
+    grid-template-columns: 1fr;
   }
 
   .surfaceToggle {

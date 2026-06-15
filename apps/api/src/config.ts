@@ -19,6 +19,41 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseDbUrl = process.env.SUPABASE_DB_URL;
 const authEnabled = Boolean(supabaseUrl && supabaseDbUrl);
 
+function parseCreditPackages(raw: string | undefined) {
+  const fallback = [
+    { id: "starter", label: "Starter", credits: 20, amountCents: 500, currency: "USD" },
+    { id: "creator", label: "Creator", credits: 75, amountCents: 1500, currency: "USD" },
+    { id: "pro", label: "Pro", credits: 200, amountCents: 3500, currency: "USD" }
+  ];
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return fallback;
+    const packages = parsed
+      .map((item) => (isRecord(item) ? item : null))
+      .filter((item): item is Record<string, unknown> => Boolean(item))
+      .map((item) => ({
+        id: typeof item.id === "string" ? item.id.trim() : "",
+        label: typeof item.label === "string" ? item.label.trim() : "",
+        credits: Number(item.credits),
+        amountCents: Number(item.amountCents),
+        currency: typeof item.currency === "string" ? item.currency.trim().toUpperCase() : ""
+      }))
+      .filter((item) => item.id && item.label && Number.isInteger(item.credits) && item.credits > 0 && Number.isInteger(item.amountCents) && item.amountCents > 0 && /^[A-Z]{3}$/.test(item.currency));
+    return packages.length > 0 ? packages : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function parsePayPalEnvironment(raw: string | undefined): "sandbox" | "live" {
+  return raw === "live" ? "live" : "sandbox";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 export const config = {
   host: process.env.API_HOST ?? "127.0.0.1",
   // PORT is the cloud convention (Railway/Render inject it); fall back to API_PORT.
@@ -115,6 +150,16 @@ export const config = {
     agentRunsPerDay: Number(process.env.QUOTA_AGENT_RUNS_PER_DAY ?? 100),
     buildsPerDay: Number(process.env.QUOTA_BUILDS_PER_DAY ?? 200)
   },
+  billing: {
+    freeCredits: Number(process.env.FREE_GENERATION_CREDITS ?? 3),
+    packages: parseCreditPackages(process.env.CREDIT_PACKAGES_JSON),
+    paypal: {
+      environment: parsePayPalEnvironment(process.env.PAYPAL_ENVIRONMENT),
+      clientId: process.env.PAYPAL_CLIENT_ID,
+      clientSecret: process.env.PAYPAL_CLIENT_SECRET,
+      webhookId: process.env.PAYPAL_WEBHOOK_ID
+    }
+  },
   projectIndexPath: path.resolve(repoRoot, ".studio/projects.json"),
   settingsPath: path.resolve(repoRoot, ".studio/settings.json"),
   workspaceRoot: path.resolve(repoRoot, process.env.STUDIO_WORKSPACE_ROOT ?? ".studio/projects"),
@@ -152,6 +197,20 @@ export function validateConfig(): string[] {
 
   if (authEnabled && !config.auth.supabaseJwksUrl && !config.auth.supabaseJwtSecret) {
     throw new Error("Accounts are enabled but no JWT verification source is available (need SUPABASE_URL for JWKS).");
+  }
+
+  if (authEnabled && config.auth.allowPlatformKeys) {
+    const hasAnyPlatformKey = Boolean(config.openAiApiKey || config.anthropicApiKey);
+    if (!hasAnyPlatformKey) {
+      warnings.push("ALLOW_PLATFORM_KEYS=true but no OPENAI_API_KEY or ANTHROPIC_API_KEY is set. Platform-credit generations will fail.");
+    }
+    const paypal = config.billing.paypal;
+    if (!paypal.clientId || !paypal.clientSecret) {
+      warnings.push("ALLOW_PLATFORM_KEYS=true but PAYPAL_CLIENT_ID/PAYPAL_CLIENT_SECRET are missing. Credit purchases will be disabled.");
+    }
+    if (!paypal.webhookId) {
+      warnings.push("PAYPAL_WEBHOOK_ID is missing. Manual capture still works, but webhook recovery/idempotency backup is disabled.");
+    }
   }
 
   return warnings;

@@ -5,7 +5,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useProjectStore } from "./stores/projectStore";
-import { CloseIcon, DownloadIcon, InfoIcon, KebabIcon, RefreshIcon, RestartIcon, ShareIcon } from "./ui/icons";
+import {
+  CloseIcon,
+  DownloadIcon,
+  EditorIcon,
+  InfoIcon,
+  KebabIcon,
+  RefreshIcon,
+  RestartIcon,
+  RuntimeIcon,
+  ShareIcon
+} from "./ui/icons";
 import styles from "./App.module.css";
 
 export function ProjectToolbar() {
@@ -69,9 +79,11 @@ export function ProjectToolbar() {
     <div className={styles.toolbar}>
       <div className={styles.surfaceToggle}>
         <button className={surfaceBtnClass(previewSurface === "editor")} onClick={() => setPreviewSurface("editor")}>
+          <EditorIcon size={14} />
           Editor
         </button>
         <button className={surfaceBtnClass(previewSurface === "runtime")} onClick={() => setPreviewSurface("runtime")}>
+          <RuntimeIcon size={14} />
           Runtime
         </button>
       </div>
