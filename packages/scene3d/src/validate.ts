@@ -221,6 +221,31 @@ function normalizeGeometry(raw: unknown, id: string, warn: (m: string) => void):
     return { kind: "lathe", points, segments: segments && segments > 0 ? Math.round(segments) : undefined };
   }
 
+  // Extrude carries a closed 2D cross-section; needs at least 3 points.
+  if (kind === "extrude") {
+    const shape = Array.isArray(raw.shape)
+      ? raw.shape.filter((p): p is [number, number] => Array.isArray(p) && typeof p[0] === "number" && typeof p[1] === "number").map(([x, y]) => [x, y] as [number, number])
+      : [];
+    if (shape.length < 3) {
+      warn(`Mesh "${id}" extrude shape had fewer than 3 points; defaulted to box.`);
+      return { kind: "box" };
+    }
+    return { kind: "extrude", shape, depth: asNumber(raw.depth), bevel: asNumber(raw.bevel) };
+  }
+
+  // Tube sweeps along a 3D path; needs at least 2 points.
+  if (kind === "tube") {
+    const path = Array.isArray(raw.path)
+      ? raw.path.filter((p): p is [number, number, number] => Array.isArray(p) && p.length >= 3 && p.every((n) => typeof n === "number")).map(([x, y, z]) => [x, y, z] as [number, number, number])
+      : [];
+    if (path.length < 2) {
+      warn(`Mesh "${id}" tube path had fewer than 2 points; defaulted to box.`);
+      return { kind: "box" };
+    }
+    const segments = asNumber(raw.segments);
+    return { kind: "tube", path, radius: asNumber(raw.radius), segments: segments && segments > 0 ? Math.round(segments) : undefined };
+  }
+
   const args = Array.isArray(raw.args) ? raw.args.filter((value): value is number => typeof value === "number") : undefined;
   // The per-kind args arity is enforced loosely; the renderer fills defaults.
   return { kind, args: args && args.length > 0 ? args : undefined } as Geometry;
@@ -241,12 +266,20 @@ function normalizeMaterial(raw: unknown): Material | undefined {
     transmission: clamp01(asNumber(raw.transmission)),
     ior: asNumber(raw.ior),
     thickness: asNumber(raw.thickness),
+    clearcoat: clamp01(asNumber(raw.clearcoat)),
+    clearcoatRoughness: clamp01(asNumber(raw.clearcoatRoughness)),
+    sheen: clamp01(asNumber(raw.sheen)),
+    sheenColor: asColor(raw.sheenColor),
     wireframe: typeof raw.wireframe === "boolean" ? raw.wireframe : undefined,
     flatShading: typeof raw.flatShading === "boolean" ? raw.flatShading : undefined,
     texture: normalizeTexture(raw.texture)
   };
-  // Glass needs a physical material.
-  if (typeof material.transmission === "number" && material.transmission > 0 && !material.type) {
+  // Transmission/clearcoat/sheen are physical-only features.
+  const needsPhysical =
+    (typeof material.transmission === "number" && material.transmission > 0) ||
+    (typeof material.clearcoat === "number" && material.clearcoat > 0) ||
+    (typeof material.sheen === "number" && material.sheen > 0);
+  if (needsPhysical && !material.type) {
     material.type = "physical";
   }
   return material;

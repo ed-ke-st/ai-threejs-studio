@@ -30,7 +30,15 @@ export type Geometry =
   // Lathe: a 2D profile revolved around the Y axis — vases, bottles, glasses,
   // lamp bases, chess pieces, wheels. Each point is [radiusFromAxis, height];
   // radius must be >= 0. `segments` controls the radial smoothness.
-  | { kind: "lathe"; points: Array<[number, number]>; segments?: number };
+  | { kind: "lathe"; points: Array<[number, number]>; segments?: number }
+  // Extrude: a closed 2D cross-section (XY plane) pushed along Z, with an optional
+  // bevel — gears, stars, signs, letters, cogs, keys, furniture profiles. Author
+  // the shape centred near the origin; it is centred on the Z (depth) axis.
+  | { kind: "extrude"; shape: Array<[number, number]>; depth?: number; bevel?: number }
+  // Tube: a circular cross-section swept along a smooth 3D curve — pipes, handles,
+  // cables, wires, hoses, vines. `path` points are [x, y, z]; `radius` is the
+  // tube thickness.
+  | { kind: "tube"; path: Array<[number, number, number]>; radius?: number; segments?: number };
 
 export type GeometryKind = Geometry["kind"];
 
@@ -45,7 +53,9 @@ export const GEOMETRY_KINDS: GeometryKind[] = [
   "torusKnot",
   "capsule",
   "icosahedron",
-  "lathe"
+  "lathe",
+  "extrude",
+  "tube"
 ];
 
 // A pleasant vase silhouette used as the fallback/seed profile for lathe geometry
@@ -61,6 +71,25 @@ export const DEFAULT_LATHE_PROFILE: Array<[number, number]> = [
   [0, 1]
 ];
 
+// Fallback/seed cross-section for extrude (a hexagon → a hex prism).
+export const DEFAULT_EXTRUDE_SHAPE: Array<[number, number]> = [
+  [0.4, 0],
+  [0.2, 0.35],
+  [-0.2, 0.35],
+  [-0.4, 0],
+  [-0.2, -0.35],
+  [0.2, -0.35]
+];
+
+// Fallback/seed path for tube (a simple arch/handle).
+export const DEFAULT_TUBE_PATH: Array<[number, number, number]> = [
+  [-0.4, 0, 0],
+  [-0.3, 0.4, 0],
+  [0, 0.55, 0],
+  [0.3, 0.4, 0],
+  [0.4, 0, 0]
+];
+
 export interface Material {
   type?: "standard" | "physical" | "basic";
   color?: Color;
@@ -72,6 +101,10 @@ export interface Material {
   transmission?: number; // physical glass (requires type "physical")
   ior?: number;
   thickness?: number;
+  clearcoat?: number; // physical: glossy lacquer layer (car paint, varnish, plastic)
+  clearcoatRoughness?: number;
+  sheen?: number; // physical: soft retro-reflection (fabric, velvet, satin)
+  sheenColor?: Color;
   wireframe?: boolean;
   flatShading?: boolean;
   texture?: TextureSpec;

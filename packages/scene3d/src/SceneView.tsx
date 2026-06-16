@@ -25,7 +25,7 @@ import type {
   SceneNode,
   TextureSpec
 } from "./schema";
-import { DEFAULT_CAMERA, DEFAULT_LATHE_PROFILE, animationDuration, getActiveCamera, normalizeTransform, sampleTrack } from "./schema";
+import { DEFAULT_CAMERA, DEFAULT_EXTRUDE_SHAPE, DEFAULT_LATHE_PROFILE, DEFAULT_TUBE_PATH, animationDuration, getActiveCamera, normalizeTransform, sampleTrack } from "./schema";
 
 interface SceneViewProps {
   scene: Scene3D;
@@ -477,10 +477,45 @@ function renderGeometry(geometry: Geometry) {
       return <RoundedBoxGeom args={geometry.args} />;
     case "lathe":
       return <LatheGeom points={geometry.points} segments={geometry.segments} />;
+    case "extrude":
+      return <ExtrudeGeom shape={geometry.shape} depth={geometry.depth} bevel={geometry.bevel} />;
+    case "tube":
+      return <TubeGeom path={geometry.path} radius={geometry.radius} segments={geometry.segments} />;
     case "box":
     default:
       return <boxGeometry args={withDefaults(geometry.args, [1, 1, 1])} />;
   }
+}
+
+// Extrude — a closed 2D shape pushed along Z with an optional bevel, centred on Z.
+function ExtrudeGeom({ shape, depth, bevel }: { shape: Array<[number, number]>; depth?: number; bevel?: number }) {
+  const geom = useMemo(() => {
+    const pts = shape && shape.length >= 3 ? shape : DEFAULT_EXTRUDE_SHAPE;
+    const s = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
+    const d = depth ?? 0.4;
+    const b = Math.max(0, bevel ?? 0.03);
+    const g = new THREE.ExtrudeGeometry(s, {
+      depth: d,
+      bevelEnabled: b > 0,
+      bevelThickness: b,
+      bevelSize: b,
+      bevelSegments: 2,
+      steps: 1
+    });
+    g.translate(0, 0, -d / 2); // centre on the depth axis like the other primitives
+    return g;
+  }, [shape, depth, bevel]);
+  return <primitive object={geom} attach="geometry" />;
+}
+
+// Tube — a circular cross-section swept along a smooth 3D curve.
+function TubeGeom({ path, radius, segments }: { path: Array<[number, number, number]>; radius?: number; segments?: number }) {
+  const geom = useMemo(() => {
+    const pts = path && path.length >= 2 ? path : DEFAULT_TUBE_PATH;
+    const curve = new THREE.CatmullRomCurve3(pts.map(([x, y, z]) => new THREE.Vector3(x, y, z)));
+    return new THREE.TubeGeometry(curve, Math.max(8, (segments ?? 0) || pts.length * 12), radius ?? 0.08, 12, false);
+  }, [path, radius, segments]);
+  return <primitive object={geom} attach="geometry" />;
 }
 
 // Rounded/beveled box — not a core three geometry, so build it imperatively and
@@ -505,7 +540,7 @@ function LatheGeom({ points, segments }: { points: Array<[number, number]>; segm
 function renderMaterial(material: Material | undefined, map: THREE.Texture | null) {
   const m = material ?? {};
   const transparent = typeof m.opacity === "number" && m.opacity < 1;
-  const usePhysical = m.type === "physical" || typeof m.transmission === "number";
+  const usePhysical = m.type === "physical" || typeof m.transmission === "number" || typeof m.clearcoat === "number" || typeof m.sheen === "number";
   const textureMap = map ?? undefined;
 
   const shared = {
@@ -532,6 +567,10 @@ function renderMaterial(material: Material | undefined, map: THREE.Texture | nul
         transmission={m.transmission ?? 0}
         ior={m.ior ?? 1.5}
         thickness={m.thickness ?? 0.5}
+        clearcoat={m.clearcoat ?? 0}
+        clearcoatRoughness={m.clearcoatRoughness ?? 0}
+        sheen={m.sheen ?? 0}
+        sheenColor={m.sheenColor ?? "#ffffff"}
       />
     );
   }

@@ -2,7 +2,7 @@
 // SceneNode with a unique id/name, a sensible default transform, and default
 // material/light props — the editor then inserts and selects it.
 
-import { DEFAULT_LATHE_PROFILE, type Geometry, type GeometryKind, type LightKind, type SceneNode, type Transform } from "@ai-threejs-studio/scene3d";
+import { DEFAULT_EXTRUDE_SHAPE, DEFAULT_LATHE_PROFILE, DEFAULT_TUBE_PATH, type Geometry, type GeometryKind, type LightKind, type SceneNode, type Transform } from "@ai-threejs-studio/scene3d";
 
 export type AddSpec =
   | { category: "mesh"; kind: GeometryKind }
@@ -22,11 +22,28 @@ const GEOMETRY_LABELS: Record<GeometryKind, string> = {
   torusKnot: "Torus Knot",
   capsule: "Capsule",
   icosahedron: "Icosahedron",
-  lathe: "Lathe (vase)"
+  lathe: "Lathe (vase)",
+  extrude: "Extrude (prism)",
+  tube: "Tube (pipe)"
 };
 
 export function geometryLabel(kind: GeometryKind): string {
   return GEOMETRY_LABELS[kind];
+}
+
+// Builds a fresh geometry for a kind — profile/shape/path kinds get seeded with a
+// sensible default so they render immediately (and never crash on missing data).
+export function geometryForKind(kind: GeometryKind): Geometry {
+  switch (kind) {
+    case "lathe":
+      return { kind, points: DEFAULT_LATHE_PROFILE };
+    case "extrude":
+      return { kind, shape: DEFAULT_EXTRUDE_SHAPE };
+    case "tube":
+      return { kind, path: DEFAULT_TUBE_PATH };
+    default:
+      return { kind } as Geometry;
+  }
 }
 
 export function lightLabel(kind: LightKind): string {
@@ -62,7 +79,7 @@ export function createNodeFromSpec(spec: AddSpec, existing: Set<string>): SceneN
     name,
     type: "mesh",
     transform: transform([0, 0.75, 0]),
-    geometry: (spec.kind === "lathe" ? { kind: "lathe", points: DEFAULT_LATHE_PROFILE } : { kind: spec.kind }) as Geometry,
+    geometry: geometryForKind(spec.kind),
     material: { color: "#cbd5e1", roughness: 0.6, metalness: 0.1 }
   };
 }

@@ -3,7 +3,8 @@ import type { ComponentType } from "react";
 import { createPortal } from "react-dom";
 import { Euler, Vector3 } from "three";
 import type { Camera, LightNode, MeshNode, SceneNode, Transform, Vec3 } from "@ai-threejs-studio/scene3d";
-import { DEFAULT_CAMERA, DEFAULT_LATHE_PROFILE, GEOMETRY_KINDS, TEXTURE_PATTERNS, normalizeTransform, type GeometryKind } from "@ai-threejs-studio/scene3d";
+import { DEFAULT_CAMERA, GEOMETRY_KINDS, TEXTURE_PATTERNS, normalizeTransform, type GeometryKind } from "@ai-threejs-studio/scene3d";
+import { geometryForKind } from "./sceneFactory";
 import { CameraIcon, ChevronDownIcon, LightIcon, MaterialIcon, SetupIcon, TextureIcon, TransformIcon, type IconProps } from "../ui/icons";
 import styles from "./Inspector.module.css";
 
@@ -564,10 +565,9 @@ function MeshSetupControls({ node, onChange }: { node: MeshNode; onChange: (next
         <select
           value={node.geometry.kind}
           onChange={(event) => {
-            const kind = event.target.value as GeometryKind;
-            // Lathe needs a profile; seed a default one so the switch renders.
-            const geometry = kind === "lathe" ? { kind, points: DEFAULT_LATHE_PROFILE } : ({ kind } as MeshNode["geometry"]);
-            onChange({ ...node, geometry });
+            // Profile/shape/path kinds (lathe/extrude/tube) are seeded with a
+            // default so the switch renders immediately.
+            onChange({ ...node, geometry: geometryForKind(event.target.value as GeometryKind) });
           }}
           className={styles.select}
         >

@@ -68,6 +68,26 @@ function geometryHalfExtents(geometry: Geometry): Vec3 {
     const r = maxR || 0.5;
     return [r, height / 2, r];
   }
+
+  // Extrude: half-extents from the 2D shape's bbox (XY) and the depth (Z).
+  if (geometry.kind === "extrude") {
+    const xs = geometry.shape.map((p) => p[0]);
+    const ys = geometry.shape.map((p) => p[1]);
+    const hx = xs.length ? (Math.max(...xs) - Math.min(...xs)) / 2 : 0.5;
+    const hy = ys.length ? (Math.max(...ys) - Math.min(...ys)) / 2 : 0.5;
+    return [hx || 0.5, hy || 0.5, (geometry.depth ?? 0.4) / 2];
+  }
+
+  // Tube: bbox of the path expanded by the tube radius.
+  if (geometry.kind === "tube") {
+    const r = geometry.radius ?? 0.08;
+    const axis = (i: number) => geometry.path.map((p) => p[i]);
+    const half = (i: number) => {
+      const vs = axis(i);
+      return (vs.length ? (Math.max(...vs) - Math.min(...vs)) / 2 : 0) + r;
+    };
+    return [half(0), half(1), half(2)];
+  }
   const a = geometry.args;
   switch (geometry.kind) {
     case "sphere": {

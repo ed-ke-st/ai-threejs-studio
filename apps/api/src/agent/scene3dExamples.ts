@@ -405,6 +405,48 @@ const ceramicStillLife: Scene3D = {
   ]
 };
 
+// 11. Extrude + tube + clearcoat/sheen — a brass award on a velvet cushion. The
+// star is EXTRUDE geometry (a 2D star cross-section + depth + bevel); the curved
+// pin is TUBE (a circle swept along a 3D path). Brass uses clearcoat for a lacquer
+// sheen; the cushion uses sheen for a velvet look.
+const brassAward: Scene3D = {
+  metadata: { name: "Brass star award", version: 1 },
+  background: "#15110d",
+  environment: { preset: "studio", intensity: 0.9 },
+  postprocessing: { bloom: { intensity: 0.4, luminanceThreshold: 0.85 }, vignette: { darkness: 0.5 } },
+  camera: { position: [1.8, 1.3, 2.4], target: [0, 0.5, 0], fov: 40 },
+  nodes: [
+    { id: "table", type: "mesh", name: "Table", geometry: { kind: "roundedBox", args: [6, 0.3, 6, 0.06, 5] }, transform: { position: [0, -0.15, 0] }, material: { color: "#2a2018", roughness: 0.6 }, receiveShadow: true },
+    { id: "cushion", type: "mesh", name: "Velvet Cushion", geometry: { kind: "roundedBox", args: [1.5, 0.28, 1.2, 0.14, 6] }, transform: { position: [0, 0.14, 0] }, material: { type: "physical", color: "#6e1330", roughness: 0.85, sheen: 1, sheenColor: "#ff6b9d" }, receiveShadow: true, castShadow: true },
+    {
+      id: "star",
+      type: "mesh",
+      name: "Brass Star",
+      geometry: {
+        kind: "extrude",
+        shape: [[0, 0.4], [0.094, 0.129], [0.38, 0.124], [0.152, -0.049], [0.235, -0.324], [0, -0.16], [-0.235, -0.324], [-0.152, -0.049], [-0.38, 0.124], [-0.094, 0.129]],
+        depth: 0.1,
+        bevel: 0.03
+      },
+      transform: { position: [0, 0.72, 0.05] },
+      material: { type: "physical", color: "#d8a43a", roughness: 0.25, metalness: 1, clearcoat: 0.8, clearcoatRoughness: 0.2 },
+      castShadow: true
+    },
+    {
+      id: "pin",
+      type: "mesh",
+      name: "Brass Pin",
+      geometry: { kind: "tube", path: [[-0.5, 0.32, 0.2], [-0.2, 0.5, 0.35], [0.2, 0.5, 0.35], [0.5, 0.32, 0.2]], radius: 0.03 },
+      transform: { position: [0, 0, 0] },
+      material: { type: "physical", color: "#e0b552", roughness: 0.3, metalness: 1, clearcoat: 0.6 },
+      castShadow: true
+    },
+    { id: "ambient", type: "light", name: "Ambient", light: "ambient", color: "#4a4036", intensity: 0.5 },
+    { id: "key", type: "light", name: "Key", light: "spot", color: "#fff4e0", intensity: 30, angle: 0.6, penumbra: 0.5, transform: { position: [2, 4, 3] } },
+    { id: "rim", type: "light", name: "Rim", light: "directional", color: "#ffd089", intensity: 1.4, transform: { position: [-3, 2, -2] } }
+  ]
+};
+
 interface FewShotExample {
   note: string;
   tags: string[];
@@ -429,6 +471,11 @@ const EXAMPLES: FewShotExample[] = [
     note: "Lathe + roundedBox for realistic form: vases/bowl/bottle are LATHE geometry (a [radius,height] profile revolved around Y — the right tool for any rotationally-symmetric object), and the shelf/books use roundedBox for finished, beveled edges. Choose the primitive that matches the form instead of approximating curves from boxes.",
     tags: ["vase", "vases", "bottle", "bottles", "glass", "cup", "mug", "bowl", "plate", "jar", "pot", "pottery", "ceramic", "lathe", "lamp", "goblet", "wine", "still life", "tableware", "kitchen", "pitcher", "shelf", "book", "books", "rounded", "furniture"],
     scene: ceramicStillLife
+  },
+  {
+    note: "Extrude + tube + clearcoat/sheen: the star is EXTRUDE (a 2D star cross-section given depth + bevel), the curved pin is TUBE (a circle swept along a 3D path), brass uses clearcoat (lacquer gloss) and the cushion uses sheen (velvet). Reach for extrude for flat shapes with thickness (gears/stars/signs/letters), tube for anything that follows a curve (pipes/cables/handles).",
+    tags: ["star", "award", "medal", "trophy", "badge", "gear", "cog", "sign", "plaque", "nameplate", "letter", "logo", "frame", "extrude", "brass", "metal", "gold", "pin", "pipe", "tube", "cable", "wire", "handle", "hose", "velvet", "fabric", "clearcoat", "lacquer", "mechanical"],
+    scene: brassAward
   }
 ];
 
