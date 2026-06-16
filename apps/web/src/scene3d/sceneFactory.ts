@@ -2,7 +2,7 @@
 // SceneNode with a unique id/name, a sensible default transform, and default
 // material/light props — the editor then inserts and selects it.
 
-import type { Geometry, GeometryKind, LightKind, SceneNode, Transform } from "@ai-threejs-studio/scene3d";
+import { DEFAULT_LATHE_PROFILE, type Geometry, type GeometryKind, type LightKind, type SceneNode, type Transform } from "@ai-threejs-studio/scene3d";
 
 export type AddSpec =
   | { category: "mesh"; kind: GeometryKind }
@@ -13,6 +13,7 @@ export const LIGHT_KINDS: LightKind[] = ["ambient", "hemisphere", "directional",
 
 const GEOMETRY_LABELS: Record<GeometryKind, string> = {
   box: "Box",
+  roundedBox: "Rounded Box",
   sphere: "Sphere",
   cylinder: "Cylinder",
   cone: "Cone",
@@ -20,7 +21,8 @@ const GEOMETRY_LABELS: Record<GeometryKind, string> = {
   torus: "Torus",
   torusKnot: "Torus Knot",
   capsule: "Capsule",
-  icosahedron: "Icosahedron"
+  icosahedron: "Icosahedron",
+  lathe: "Lathe (vase)"
 };
 
 export function geometryLabel(kind: GeometryKind): string {
@@ -60,7 +62,7 @@ export function createNodeFromSpec(spec: AddSpec, existing: Set<string>): SceneN
     name,
     type: "mesh",
     transform: transform([0, 0.75, 0]),
-    geometry: { kind: spec.kind } as Geometry,
+    geometry: (spec.kind === "lathe" ? { kind: "lathe", points: DEFAULT_LATHE_PROFILE } : { kind: spec.kind }) as Geometry,
     material: { color: "#cbd5e1", roughness: 0.6, metalness: 0.1 }
   };
 }

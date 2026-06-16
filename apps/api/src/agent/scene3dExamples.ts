@@ -349,6 +349,62 @@ const tinyPlanetFlyby: Scene3D = {
   }
 };
 
+// 10. Lathe + roundedBox showcase — a ceramic still life. The vases/bottle are
+// LATHE geometry (a 2D profile revolved around Y); the shelf and books are
+// roundedBox (beveled edges read as finished, not CAD). Demonstrates choosing the
+// right primitive for the form instead of approximating everything from boxes.
+const ceramicStillLife: Scene3D = {
+  metadata: { name: "Ceramic still life", version: 1 },
+  background: "#1a1714",
+  environment: { preset: "apartment", intensity: 0.7 },
+  postprocessing: { bloom: { intensity: 0.5, luminanceThreshold: 0.8 }, vignette: { darkness: 0.45 } },
+  camera: { position: [2.6, 1.7, 3.2], target: [0, 0.65, 0], fov: 42 },
+  nodes: [
+    { id: "wall", type: "mesh", name: "Back wall", geometry: { kind: "box", args: [12, 8, 0.3] }, transform: { position: [0, 3, -2.4] }, material: { color: "#2a2622", roughness: 0.95 }, receiveShadow: true },
+    { id: "shelf", type: "mesh", name: "Oak Shelf", geometry: { kind: "roundedBox", args: [4.2, 0.22, 1.4, 0.05, 5] }, transform: { position: [0, 0.4, 0] }, material: { color: "#6b4a2e", roughness: 0.55, metalness: 0 }, castShadow: true, receiveShadow: true },
+    {
+      id: "tall-vase",
+      type: "mesh",
+      name: "Tall Vase",
+      geometry: { kind: "lathe", points: [[0, 0], [0.26, 0], [0.28, 0.05], [0.2, 0.2], [0.16, 0.55], [0.22, 0.78], [0.18, 0.92], [0.16, 0.95], [0, 0.95]] },
+      transform: { position: [-1.1, 0.51, 0.05] },
+      material: { type: "physical", color: "#3c6e71", roughness: 0.3, metalness: 0 },
+      castShadow: true
+    },
+    {
+      id: "bowl",
+      type: "mesh",
+      name: "Wide Bowl",
+      geometry: { kind: "lathe", points: [[0, 0], [0.42, 0.02], [0.46, 0.16], [0.48, 0.3], [0.45, 0.31], [0.43, 0.17], [0.39, 0.04], [0.05, 0.03]] },
+      transform: { position: [0.55, 0.51, 0.2] },
+      material: { color: "#c9633f", roughness: 0.45, metalness: 0.05 },
+      castShadow: true
+    },
+    {
+      id: "bottle",
+      type: "mesh",
+      name: "Glass Bottle",
+      geometry: { kind: "lathe", points: [[0, 0], [0.16, 0], [0.17, 0.02], [0.17, 0.4], [0.06, 0.52], [0.06, 0.72], [0.07, 0.74], [0.07, 0.52], [0.16, 0.4], [0.16, 0.02]] },
+      transform: { position: [1.35, 0.51, -0.1] },
+      material: { type: "physical", color: "#9ec7b8", roughness: 0.08, metalness: 0, transmission: 0.85, ior: 1.5, thickness: 0.4 },
+      castShadow: true
+    },
+    {
+      id: "books",
+      type: "group",
+      name: "Books",
+      transform: { position: [-1.4, 0.51, -0.35] },
+      children: [
+        { id: "book-1", type: "mesh", name: "Book 1", geometry: { kind: "roundedBox", args: [0.8, 0.12, 0.55, 0.02, 4] }, transform: { position: [0, 0.06, 0] }, material: { color: "#7a3b3b", roughness: 0.7 } },
+        { id: "book-2", type: "mesh", name: "Book 2", geometry: { kind: "roundedBox", args: [0.74, 0.1, 0.5, 0.02, 4] }, transform: { position: [0.03, 0.17, 0.02] }, material: { color: "#36506b", roughness: 0.7 } }
+      ]
+    },
+    { id: "ambient", type: "light", name: "Ambient", light: "ambient", color: "#5a4f44", intensity: 0.5 },
+    { id: "key", type: "light", name: "Window key", light: "directional", color: "#ffe9cf", intensity: 2.2, transform: { position: [3, 5, 2] } },
+    { id: "fill", type: "light", name: "Soft fill", light: "point", color: "#9fb4d0", intensity: 4, distance: 9, transform: { position: [-3, 2, 3] } }
+  ]
+};
+
 interface FewShotExample {
   note: string;
   tags: string[];
@@ -368,6 +424,11 @@ const EXAMPLES: FewShotExample[] = [
     note: "Keyframe animation + camera fly-through: a continuous spin (rotation.y over the full duration), eased bobbing (symmetric easeInOut keyframes), and a NAMED camera (cameras + activeCameraId) animated via position/target/fov tracks — all tracks end on their start values so loop:true plays seamlessly.",
     tags: ["animation", "animated", "animate", "motion", "spin", "spinning", "rotate", "rotating", "orbit", "orbiting", "fly", "flyby", "fly-through", "flythrough", "cinematic", "camera", "keyframe", "bob", "hover", "float", "turntable", "loop", "planet"],
     scene: tinyPlanetFlyby
+  },
+  {
+    note: "Lathe + roundedBox for realistic form: vases/bowl/bottle are LATHE geometry (a [radius,height] profile revolved around Y — the right tool for any rotationally-symmetric object), and the shelf/books use roundedBox for finished, beveled edges. Choose the primitive that matches the form instead of approximating curves from boxes.",
+    tags: ["vase", "vases", "bottle", "bottles", "glass", "cup", "mug", "bowl", "plate", "jar", "pot", "pottery", "ceramic", "lathe", "lamp", "goblet", "wine", "still life", "tableware", "kitchen", "pitcher", "shelf", "book", "books", "rounded", "furniture"],
+    scene: ceramicStillLife
   }
 ];
 

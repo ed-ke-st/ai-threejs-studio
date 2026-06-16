@@ -18,6 +18,7 @@ export interface Transform {
 
 export type Geometry =
   | { kind: "box"; args?: [number, number, number] }
+  | { kind: "roundedBox"; args?: [number, number, number, number?, number?] } // width, height, depth, cornerRadius, smoothness
   | { kind: "sphere"; args?: [number, number?, number?] } // radius, widthSeg, heightSeg
   | { kind: "cylinder"; args?: [number, number, number, number?] } // top, bottom, height, radialSeg
   | { kind: "cone"; args?: [number, number, number?] } // radius, height, radialSeg
@@ -25,12 +26,17 @@ export type Geometry =
   | { kind: "torus"; args?: [number, number, number?, number?] } // radius, tube, radialSeg, tubularSeg
   | { kind: "torusKnot"; args?: [number, number, number?, number?] }
   | { kind: "capsule"; args?: [number, number, number?, number?] } // radius, length, capSeg, radialSeg
-  | { kind: "icosahedron"; args?: [number, number?] }; // radius, detail
+  | { kind: "icosahedron"; args?: [number, number?] } // radius, detail
+  // Lathe: a 2D profile revolved around the Y axis — vases, bottles, glasses,
+  // lamp bases, chess pieces, wheels. Each point is [radiusFromAxis, height];
+  // radius must be >= 0. `segments` controls the radial smoothness.
+  | { kind: "lathe"; points: Array<[number, number]>; segments?: number };
 
 export type GeometryKind = Geometry["kind"];
 
 export const GEOMETRY_KINDS: GeometryKind[] = [
   "box",
+  "roundedBox",
   "sphere",
   "cylinder",
   "cone",
@@ -38,7 +44,21 @@ export const GEOMETRY_KINDS: GeometryKind[] = [
   "torus",
   "torusKnot",
   "capsule",
-  "icosahedron"
+  "icosahedron",
+  "lathe"
+];
+
+// A pleasant vase silhouette used as the fallback/seed profile for lathe geometry
+// (e.g. when switched on manually before a profile is authored).
+export const DEFAULT_LATHE_PROFILE: Array<[number, number]> = [
+  [0, 0],
+  [0.3, 0],
+  [0.34, 0.18],
+  [0.24, 0.45],
+  [0.18, 0.7],
+  [0.26, 0.92],
+  [0.22, 1],
+  [0, 1]
 ];
 
 export interface Material {

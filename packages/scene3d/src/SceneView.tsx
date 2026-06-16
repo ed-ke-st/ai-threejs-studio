@@ -10,6 +10,7 @@ import * as THREE from "three";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Center, Clone, Edges, Environment, Html, OrthographicCamera, PerspectiveCamera, useGLTF } from "@react-three/drei";
 import { Bloom, DepthOfField, EffectComposer, SSAO, Vignette } from "@react-three/postprocessing";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import type {
   AnimatableProperty,
   Animation,
@@ -24,7 +25,7 @@ import type {
   SceneNode,
   TextureSpec
 } from "./schema";
-import { DEFAULT_CAMERA, animationDuration, getActiveCamera, normalizeTransform, sampleTrack } from "./schema";
+import { DEFAULT_CAMERA, DEFAULT_LATHE_PROFILE, animationDuration, getActiveCamera, normalizeTransform, sampleTrack } from "./schema";
 
 interface SceneViewProps {
   scene: Scene3D;
@@ -472,10 +473,33 @@ function renderGeometry(geometry: Geometry) {
       return <capsuleGeometry args={withDefaults(geometry.args, [0.4, 0.9, 8, 24])} />;
     case "icosahedron":
       return <icosahedronGeometry args={withDefaults(geometry.args, [0.9, 0])} />;
+    case "roundedBox":
+      return <RoundedBoxGeom args={geometry.args} />;
+    case "lathe":
+      return <LatheGeom points={geometry.points} segments={geometry.segments} />;
     case "box":
     default:
       return <boxGeometry args={withDefaults(geometry.args, [1, 1, 1])} />;
   }
+}
+
+// Rounded/beveled box — not a core three geometry, so build it imperatively and
+// memoise so it's only rebuilt when its args change (and disposed on replace).
+function RoundedBoxGeom({ args }: { args?: ReadonlyArray<number | undefined> }) {
+  const [w, h, d, radius, smoothness] = withDefaults(args, [1, 1, 1, 0.12, 4]);
+  const geom = useMemo(() => new RoundedBoxGeometry(w, h, d, Math.max(1, Math.round(smoothness)), radius), [w, h, d, radius, smoothness]);
+  return <primitive object={geom} attach="geometry" />;
+}
+
+// Lathe — a 2D profile (points are [radiusFromAxis, height]) revolved around Y.
+// Falls back to a default vase profile if no valid profile is provided, so a
+// half-edited geometry (e.g. switched on in the inspector) never crashes.
+function LatheGeom({ points, segments }: { points: Array<[number, number]>; segments?: number }) {
+  const profile = useMemo(() => {
+    const src = points && points.length >= 2 ? points : DEFAULT_LATHE_PROFILE;
+    return src.map(([x, y]) => new THREE.Vector2(x, y));
+  }, [points]);
+  return <latheGeometry args={[profile, segments ?? 64]} />;
 }
 
 function renderMaterial(material: Material | undefined, map: THREE.Texture | null) {

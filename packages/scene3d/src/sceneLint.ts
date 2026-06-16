@@ -53,6 +53,21 @@ interface NodeBox {
 // --- bounds ---------------------------------------------------------------
 
 function geometryHalfExtents(geometry: Geometry): Vec3 {
+  // Lathe carries a revolved 2D profile rather than args: radius from the max
+  // profile x, height from the profile's y span.
+  if (geometry.kind === "lathe") {
+    let maxR = 0;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const [x, y] of geometry.points) {
+      maxR = Math.max(maxR, Math.abs(x));
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    }
+    const height = Number.isFinite(maxY - minY) ? maxY - minY : 1;
+    const r = maxR || 0.5;
+    return [r, height / 2, r];
+  }
   const a = geometry.args;
   switch (geometry.kind) {
     case "sphere": {
@@ -93,6 +108,7 @@ function geometryHalfExtents(geometry: Geometry): Vec3 {
       const r = (a?.[0] as number) ?? 0.9;
       return [r, r, r];
     }
+    case "roundedBox":
     case "box":
     default: {
       const w = (a?.[0] as number) ?? 1;

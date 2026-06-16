@@ -204,6 +204,23 @@ function normalizeGeometry(raw: unknown, id: string, warn: (m: string) => void):
   if (!GEOMETRY_KINDS.includes(raw.kind as GeometryKind)) {
     warn(`Mesh "${id}" had unknown geometry "${String(raw.kind)}"; defaulted to box.`);
   }
+
+  // Lathe carries a 2D profile instead of a flat args list. A valid profile needs
+  // at least two points; otherwise fall back to a simple box so the scene renders.
+  if (kind === "lathe") {
+    const points = Array.isArray(raw.points)
+      ? raw.points
+          .filter((p): p is [number, number] => Array.isArray(p) && typeof p[0] === "number" && typeof p[1] === "number")
+          .map(([x, y]) => [Math.max(0, x), y] as [number, number])
+      : [];
+    if (points.length < 2) {
+      warn(`Mesh "${id}" lathe had fewer than 2 profile points; defaulted to box.`);
+      return { kind: "box" };
+    }
+    const segments = asNumber(raw.segments);
+    return { kind: "lathe", points, segments: segments && segments > 0 ? Math.round(segments) : undefined };
+  }
+
   const args = Array.isArray(raw.args) ? raw.args.filter((value): value is number => typeof value === "number") : undefined;
   // The per-kind args arity is enforced loosely; the renderer fills defaults.
   return { kind, args: args && args.length > 0 ? args : undefined } as Geometry;
