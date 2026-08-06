@@ -595,17 +595,20 @@
   background: rgba(8, 14, 24, 0.68);
   color: var(--c-text);
   text-align: left;
-  cursor: pointer;
 }
 
-.packageCard:hover:not(:disabled) {
+.packageCard:hover:not(:disabled):not([data-disabled]) {
   border-color: var(--c-accent);
   background: rgba(22, 49, 75, 0.45);
 }
 
-.packageCard:disabled {
+.packageCard:disabled,
+.packageCard[data-disabled] {
   opacity: 0.55;
-  cursor: default;
+}
+
+button.packageCard {
+  cursor: pointer;
 }
 
 .packageCard strong {
@@ -623,6 +626,11 @@
   font-size: 13px;
   font-style: normal;
   font-weight: 700;
+}
+
+.paypalButton {
+  min-height: 36px;
+  margin-top: 4px;
 }
 
 .pendingOrder {

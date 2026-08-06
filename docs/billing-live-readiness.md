@@ -9,6 +9,8 @@ take real PayPal payments.
   are enabled.
 - The API can create PayPal orders, capture approved PayPal orders, receive PayPal
   webhooks, and credit the user's paid balance.
+- The web app renders PayPal JS SDK v6 buttons when `VITE_PAYPAL_CLIENT_ID` is
+  configured. PayPal secrets and capture calls stay server-side.
 - Agent runs consume one credit per generated variation and refund the reservation
   if generation fails before completing.
 - Supabase migration `0004_billing_credits.sql` adds `credit_balances`,
@@ -28,6 +30,8 @@ take real PayPal payments.
   - `PAYPAL_CLIENT_ID`
   - `PAYPAL_CLIENT_SECRET`
   - `PAYPAL_WEBHOOK_ID`
+  - `VITE_PAYPAL_ENVIRONMENT=live`
+  - `VITE_PAYPAL_CLIENT_ID`
   - final `CREDIT_PACKAGES_JSON`
 - Configure the PayPal live webhook URL:
   - `https://<your-domain>/api/billing/paypal/webhook`
@@ -38,12 +42,70 @@ take real PayPal payments.
 - Confirm the app is served over HTTPS and PayPal can reach the webhook endpoint.
 - Run full sandbox QA before flipping to `PAYPAL_ENVIRONMENT=live`.
 
+## Dashboard changes
+
+### Railway API service
+
+Set these on the API service:
+
+- `SUPABASE_URL`
+- `SUPABASE_DB_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `SETTINGS_ENC_KEY`
+- `ALLOW_PLATFORM_KEYS=true`
+- `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY`
+- `PAYPAL_ENVIRONMENT=sandbox` for QA, then `PAYPAL_ENVIRONMENT=live`
+- `PAYPAL_CLIENT_ID` from the matching PayPal REST app
+- `PAYPAL_CLIENT_SECRET` from the matching PayPal REST app
+- `PAYPAL_WEBHOOK_ID` from the PayPal webhook configured for this API URL
+- `CREDIT_PACKAGES_JSON` if the default packages should be overridden
+
+Do not set `VITE_PAYPAL_*` only on Railway unless Railway also builds/serves the
+web bundle. The API uses `PAYPAL_*`; the browser bundle uses `VITE_PAYPAL_*`.
+
+### Vercel web app
+
+Set these on the web project and redeploy so Vite bakes them into the bundle:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+- `VITE_PAYPAL_ENVIRONMENT=sandbox` for QA, then `VITE_PAYPAL_ENVIRONMENT=live`
+- `VITE_PAYPAL_CLIENT_ID` from the matching PayPal REST app
+
+Do not set `PAYPAL_CLIENT_SECRET` in Vercel for the browser app.
+
+### Supabase
+
+- Apply migrations through `supabase/migrations/0004_billing_credits.sql`.
+- Confirm the app has the required tables: `credit_balances`, `credit_ledger`,
+  `paypal_orders`, and the `ai_usage_source` profile setting.
+- Use the Supabase project URL as `SUPABASE_URL` / `VITE_SUPABASE_URL`.
+- Use the anon key only in `VITE_SUPABASE_ANON_KEY`.
+- Use the service-role key only on the Railway API.
+
+### PayPal developer dashboard
+
+- Create separate sandbox and live REST apps.
+- Copy each app's client ID to both API and web env for that environment:
+  `PAYPAL_CLIENT_ID` and `VITE_PAYPAL_CLIENT_ID`.
+- Copy each app's secret only to the Railway API: `PAYPAL_CLIENT_SECRET`.
+- Create a webhook for the deployed API URL:
+  `https://<your-domain>/api/billing/paypal/webhook`.
+- Subscribe at minimum to `PAYMENT.CAPTURE.COMPLETED`.
+- Copy the webhook ID to Railway as `PAYPAL_WEBHOOK_ID`.
+- Use sandbox credentials while `PAYPAL_ENVIRONMENT` and
+  `VITE_PAYPAL_ENVIRONMENT` are `sandbox`; switch both to live together.
+
 Official references:
 
 - PayPal production checklist:
   https://developer.paypal.com/api/rest/production/
 - PayPal Checkout create/capture flow:
   https://developer.paypal.com/studio/checkout/standard/integrate
+- PayPal JS SDK v6 setup:
+  https://docs.paypal.ai/developer/how-to/sdk/js/v6/configuration
+- PayPal React SDK v6 reference:
+  https://docs.paypal.ai/reference/sdk/react
 - PayPal webhook integration:
   https://developer.paypal.com/api/rest/webhooks/rest/
 - PayPal idempotency:
@@ -56,11 +118,10 @@ Official references:
   crediting.
 - Done: record refund/reversal/dispute webhook signals for reconciliation.
 - Done: add basic in-process rate limiting to credit-package order creation.
+- Done: render PayPal JS SDK v6 checkout buttons in the web app.
 - Partially done: admin role setup and read-only billing endpoints. Still needed:
   manual credit grant/revoke, reviewed-state workflow, and PayPal transaction
   reconciliation scripts.
-- Add a smoother post-approval UX: PayPal JS SDK buttons, or return/cancel URLs
-  that automatically capture after approval.
 
 ## Operational requirements
 
@@ -84,7 +145,8 @@ Run these before live:
 2. User with no BYO key can select platform credits and generate.
 3. Insufficient credits returns `402` and does not consume daily quota.
 4. Failed generation refunds the reserved credit.
-5. PayPal sandbox purchase creates an order and opens approval.
+5. PayPal sandbox purchase creates an order from the JS SDK v6 button and opens
+   approval.
 6. Capturing the same order twice credits only once.
 7. Webhook replay credits only once.
 8. Closing the tab after PayPal approval is recoverable by webhook or manual

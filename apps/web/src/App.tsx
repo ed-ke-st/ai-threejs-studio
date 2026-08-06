@@ -1,3 +1,4 @@
+import { PayPalOneTimePaymentButton, PayPalProvider } from "@paypal/react-paypal-js/sdk-v6";
 import { useEffect, useRef, useState } from "react";
 import { useProjectStore } from "./stores/projectStore";
 import { Scene3DEditor } from "./scene3d/Scene3DEditor";
@@ -5,8 +6,22 @@ import { ProjectMenu } from "./ProjectMenu";
 import { ProjectToolbar } from "./ProjectToolbar";
 import { CloseIcon, SettingsIcon } from "./ui/icons";
 import { authEnabled, supabase } from "./auth/supabaseClient";
-import { MODEL_CHOICES, type AdminBillingOrder, type AppSettingsUpdate } from "@ai-threejs-studio/shared";
+import { MODEL_CHOICES, type AdminBillingOrder, type AppSettingsUpdate, type BillingOrder, type CreditPackage } from "@ai-threejs-studio/shared";
 import styles from "./App.module.css";
+
+const paypalClientId = import.meta.env.VITE_PAYPAL_CLIENT_ID?.trim() ?? "";
+const paypalEnvironment = paypalSdkEnvironment(import.meta.env.VITE_PAYPAL_ENVIRONMENT);
+
+function paypalSdkEnvironment(value: string | undefined): "sandbox" | "production" {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "live" || normalized === "prod" || normalized === "production" ? "production" : "sandbox";
+}
+
+function paypalErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string") return error.message;
+  return String(error || "PayPal checkout failed.");
+}
 
 export function App() {
   const health = useProjectStore((s) => s.health);
@@ -169,6 +184,44 @@ function ModelRow({ label, value, options, onChange }: { label: string; value: s
   );
 }
 
+function PayPalPackageCard({
+  pack,
+  disabled,
+  isBusy,
+  onCreateOrder,
+  onApprove,
+  onCancel,
+  onError
+}: {
+  pack: CreditPackage;
+  disabled: boolean;
+  isBusy: boolean;
+  onCreateOrder: () => Promise<{ orderId: string }>;
+  onApprove: (paypalOrderId: string | undefined) => Promise<void>;
+  onCancel: () => void;
+  onError: (error: unknown) => void;
+}) {
+  return (
+    <article className={styles.packageCard} data-disabled={disabled || undefined}>
+      <strong>{pack.label}</strong>
+      <span>{pack.credits} credits</span>
+      <em>{(pack.amountCents / 100).toLocaleString(undefined, { style: "currency", currency: pack.currency })}</em>
+      <div className={styles.paypalButton}>
+        <PayPalOneTimePaymentButton
+          createOrder={onCreateOrder}
+          disabled={disabled}
+          onApprove={(data) => onApprove(typeof data.orderId === "string" ? data.orderId : undefined)}
+          onCancel={onCancel}
+          onError={onError}
+          presentationMode="auto"
+          type="pay"
+        />
+      </div>
+      <small>{isBusy ? "Opening PayPal..." : " "}</small>
+    </article>
+  );
+}
+
 function SettingsPanel() {
   const settings = useProjectStore((s) => s.settings);
   const updateSettings = useProjectStore((s) => s.updateSettings);
@@ -185,6 +238,7 @@ function SettingsPanel() {
   const [anthropicModels, setAnthropicModels] = useState<string[]>([]);
   const [pendingOrder, setPendingOrder] = useState<{ id: string; label: string; credits: number } | null>(null);
   const [buying, setBuying] = useState<string | null>(null);
+  const checkoutOrders = useRef(new Map<string, BillingOrder>());
   const activeBilling = billing?.credits.enabled ? billing : null;
   const platformCreditsEnabled = Boolean(activeBilling);
 
@@ -231,6 +285,57 @@ function SettingsPanel() {
     } finally {
       setBuying(null);
     }
+  };
+
+  const createPayPalSdkOrder = async (pack: CreditPackage) => {
+    setError(null);
+    setBuying(pack.id);
+    try {
+      const order = await createBillingOrder(pack.id);
+      checkoutOrders.current.set(pack.id, order);
+      checkoutOrders.current.set(order.paypalOrderId, order);
+      setPendingOrder({ id: order.id, label: order.package.label, credits: order.package.credits });
+      return { orderId: order.paypalOrderId };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      logError("Couldn’t start PayPal checkout", message);
+      throw e;
+    } finally {
+      setBuying(null);
+    }
+  };
+
+  const approvePayPalSdkOrder = async (paypalOrderId: string | undefined, packageId: string) => {
+    const order = (paypalOrderId ? checkoutOrders.current.get(paypalOrderId) : undefined) ?? checkoutOrders.current.get(packageId);
+    if (!order) {
+      const message = "PayPal approved an order the app could not match. Refresh billing status or check the PayPal webhook.";
+      setError(message);
+      logError("Couldn’t complete PayPal checkout", message);
+      return;
+    }
+    setError(null);
+    setBuying(packageId);
+    try {
+      await captureBillingOrder(order.id);
+      checkoutOrders.current.delete(packageId);
+      checkoutOrders.current.delete(order.paypalOrderId);
+      setPendingOrder(null);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      logError("Couldn’t complete PayPal checkout", message);
+      throw e;
+    } finally {
+      setBuying(null);
+    }
+  };
+
+  const handlePayPalSdkError = (error: unknown) => {
+    const message = paypalErrorMessage(error);
+    setBuying(null);
+    setError(message);
+    logError("PayPal checkout failed", message);
   };
 
   const captureCredits = async () => {
@@ -295,14 +400,31 @@ function SettingsPanel() {
             <span>Bonus {activeBilling.credits.bonus}</span>
           </div>
           <div className={styles.packageGrid}>
-            {activeBilling.packages.map((pack) => (
-              <button key={pack.id} className={styles.packageCard} type="button" disabled={Boolean(buying)} onClick={() => void buyCredits(pack.id)}>
-                <strong>{pack.label}</strong>
-                <span>{pack.credits} credits</span>
-                <em>{(pack.amountCents / 100).toLocaleString(undefined, { style: "currency", currency: pack.currency })}</em>
-                <small>{buying === pack.id ? "Opening PayPal…" : "Buy with PayPal"}</small>
-              </button>
-            ))}
+            {paypalClientId ? (
+              <PayPalProvider clientId={paypalClientId} environment={paypalEnvironment} components={["paypal-payments"]} pageType="checkout">
+                {activeBilling.packages.map((pack) => (
+                  <PayPalPackageCard
+                    key={pack.id}
+                    pack={pack}
+                    disabled={Boolean(buying)}
+                    isBusy={buying === pack.id}
+                    onCreateOrder={() => createPayPalSdkOrder(pack)}
+                    onApprove={(paypalOrderId) => approvePayPalSdkOrder(paypalOrderId, pack.id)}
+                    onCancel={() => setBuying(null)}
+                    onError={handlePayPalSdkError}
+                  />
+                ))}
+              </PayPalProvider>
+            ) : (
+              activeBilling.packages.map((pack) => (
+                <button key={pack.id} className={styles.packageCard} type="button" disabled={Boolean(buying)} onClick={() => void buyCredits(pack.id)}>
+                  <strong>{pack.label}</strong>
+                  <span>{pack.credits} credits</span>
+                  <em>{(pack.amountCents / 100).toLocaleString(undefined, { style: "currency", currency: pack.currency })}</em>
+                  <small>{buying === pack.id ? "Opening PayPal..." : "Buy with PayPal"}</small>
+                </button>
+              ))
+            )}
           </div>
           {pendingOrder ? (
             <div className={styles.pendingOrder}>

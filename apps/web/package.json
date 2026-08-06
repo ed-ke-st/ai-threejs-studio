@@ -13,6 +13,7 @@
   "dependencies": {
     "@ai-threejs-studio/scene3d": "workspace:*",
     "@ai-threejs-studio/shared": "workspace:*",
+    "@paypal/react-paypal-js": "^10.1.1",
     "@react-three/drei": "^10.1.2",
     "@react-three/fiber": "^9.1.2",
     "@supabase/supabase-js": "^2.107.0",
