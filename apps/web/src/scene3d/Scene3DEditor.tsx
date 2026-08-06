@@ -466,6 +466,54 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
     [recordHistory, queueSave, primaryId]
   );
 
+  // Import a GLB/glTF model: upload the file to the project asset library, then
+  // add a `model` node that references the stable asset-content endpoint (so the
+  // reference survives reloads — unlike an expiring signed URL). The renderer
+  // loads it through drei's useGLTF.
+  const importModel = useCallback(
+    async (file: File) => {
+      if (!/\.(glb|gltf)$/i.test(file.name)) {
+        logError("Model import failed", "Choose a .glb or .gltf file.");
+        return;
+      }
+      if (file.size > 24 * 1024 * 1024) {
+        logError("Model import failed", "Model is too large (max ~24 MB).");
+        return;
+      }
+      setSaveState("saving");
+      try {
+        const contentBase64 = await readFileBase64(file);
+        const type = file.name.toLowerCase().endsWith(".glb") ? "model/glb" : "model/gltf";
+        const response = await fetch(`/api/projects/${projectId}/assets/upload`, {
+          method: "POST",
+          headers: { "content-type": "application/json", ...(await authHeaders()) },
+          body: JSON.stringify({ name: file.name, type, contentBase64 })
+        });
+        if (!response.ok) {
+          const message = await response.json().then((b: { error?: string }) => b?.error).catch(() => null);
+          throw new Error(message || `Upload failed (${response.status}).`);
+        }
+        const { asset } = (await response.json()) as { asset: { id: string } };
+        const existing = collectIds(sceneRef.current?.nodes ?? []);
+        let id = "model";
+        for (let n = 2; existing.has(id); n += 1) id = `model-${n}`;
+        const node: SceneNode = {
+          id,
+          name: file.name.replace(/\.(glb|gltf)$/i, "") || "Model",
+          type: "model",
+          assetUrl: `/api/projects/${projectId}/assets/${asset.id}/content`,
+          transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }
+        };
+        applyEdit((current) => ({ ...current, nodes: [...current.nodes, node] }));
+        setSelectedIds([id]);
+      } catch (error) {
+        setSaveState("error");
+        logError("Model import failed", error instanceof Error ? error.message : String(error));
+      }
+    },
+    [projectId, applyEdit, logError]
+  );
+
   // (module helpers RootCapture + readChannel are defined at the bottom of the file)
 
   // Commit a transform from the viewport gizmo (one undo step per drag). When
@@ -1562,7 +1610,7 @@ export function Scene3DEditor({ projectId }: Scene3DEditorProps) {
                 </button>
               </div>
             ) : null}
-            <AddObjectMenu onAdd={addObject} />
+            <AddObjectMenu onAdd={addObject} onImportModel={(file) => void importModel(file)} />
           </div>
 
           <div className={paneCollapsed ? `${styles.sceneToolsDock} ${styles.sceneToolsDockInset}` : styles.sceneToolsDock} aria-label="Scene tools">
@@ -2025,6 +2073,13 @@ function readDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error("File read failed"));
     reader.readAsDataURL(file);
   });
+}
+
+// Reads a file as raw base64 (no data: prefix) for the asset-upload endpoint.
+async function readFileBase64(file: File): Promise<string> {
+  const dataUrl = await readDataUrl(file);
+  const comma = dataUrl.indexOf(",");
+  return comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {

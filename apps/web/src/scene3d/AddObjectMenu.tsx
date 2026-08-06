@@ -13,7 +13,7 @@ import { LIGHT_KINDS, geometryLabel, lightLabel, type AddSpec } from "./sceneFac
 import styles from "./AddObjectMenu.module.css";
 import { ObjectIcon } from "../ui/icons";
 
-export function AddObjectMenu({ onAdd }: { onAdd: (spec: AddSpec) => void }) {
+export function AddObjectMenu({ onAdd, onImportModel }: { onAdd: (spec: AddSpec) => void; onImportModel?: (file: File) => void }) {
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -90,6 +90,25 @@ export function AddObjectMenu({ onAdd }: { onAdd: (spec: AddSpec) => void }) {
               <button className={styles.item} onClick={() => pick({ category: "group" })}>
                 Group
               </button>
+              {onImportModel ? (
+                <>
+                  <div className={styles.section}>Model</div>
+                  <label className={styles.item} style={{ cursor: "pointer" }}>
+                    Import GLB…
+                    <input
+                      type="file"
+                      accept=".glb,.gltf,model/gltf-binary,model/gltf+json"
+                      style={{ display: "none" }}
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0];
+                        event.currentTarget.value = "";
+                        if (file) onImportModel(file);
+                        setOpen(false);
+                      }}
+                    />
+                  </label>
+                </>
+              ) : null}
             </div>,
             document.body
           )
