@@ -1,31 +1,20 @@
 import { useState, type CSSProperties, type FormEvent } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-type Mode = "sign-in" | "sign-up";
-
 export function LoginScreen({ client }: { client: SupabaseClient }) {
-  const [mode, setMode] = useState<Mode>("sign-in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError(null);
-    setNotice(null);
     try {
-      if (mode === "sign-in") {
-        const { error } = await client.auth.signInWithPassword({ email, password });
-        if (error) setError(error.message);
-        // On success, AuthGate's onAuthStateChange swaps to the app.
-      } else {
-        const { data, error } = await client.auth.signUp({ email, password });
-        if (error) setError(error.message);
-        else if (!data.session) setNotice("Check your email to confirm your account, then sign in.");
-      }
+      const { error } = await client.auth.signInWithPassword({ email, password });
+      if (error) setError(error.message);
+      // On success, AuthGate's onAuthStateChange swaps to the app.
     } finally {
       setBusy(false);
     }
@@ -38,7 +27,10 @@ export function LoginScreen({ client }: { client: SupabaseClient }) {
           <span style={logo}>3D</span>
           <strong>AI Three.js Studio</strong>
         </div>
-        <h1 style={heading}>{mode === "sign-in" ? "Sign in" : "Create account"}</h1>
+        <div>
+          <h1 style={heading}>Sign in</h1>
+          <p style={intro}>The hosted studio is currently an invite-only beta.</p>
+        </div>
 
         <label style={field}>
           <span style={label}>Email</span>
@@ -57,7 +49,7 @@ export function LoginScreen({ client }: { client: SupabaseClient }) {
           <input
             style={input}
             type="password"
-            autoComplete={mode === "sign-in" ? "current-password" : "new-password"}
+            autoComplete="current-password"
             required
             minLength={6}
             value={password}
@@ -66,23 +58,15 @@ export function LoginScreen({ client }: { client: SupabaseClient }) {
         </label>
 
         {error ? <p style={errorText}>{error}</p> : null}
-        {notice ? <p style={noticeText}>{notice}</p> : null}
 
         <button style={primary} type="submit" disabled={busy}>
-          {busy ? "…" : mode === "sign-in" ? "Sign in" : "Sign up"}
+          {busy ? "Signing in…" : "Sign in"}
         </button>
 
-        <button
-          style={toggle}
-          type="button"
-          onClick={() => {
-            setMode((m) => (m === "sign-in" ? "sign-up" : "sign-in"));
-            setError(null);
-            setNotice(null);
-          }}
-        >
-          {mode === "sign-in" ? "Need an account? Sign up" : "Have an account? Sign in"}
-        </button>
+        <div style={links}>
+          <a style={link} href="/request-access">Request beta access</a>
+          <a style={mutedLink} href="/">Back to overview</a>
+        </div>
       </form>
     </div>
   );
@@ -118,6 +102,7 @@ const logo: CSSProperties = {
   fontWeight: 700
 };
 const heading: CSSProperties = { margin: "4px 0 0", fontSize: 18 };
+const intro: CSSProperties = { margin: "7px 0 0", color: "var(--c-text-muted)", fontSize: 13, lineHeight: 1.5 };
 const field: CSSProperties = { display: "flex", flexDirection: "column", gap: 5 };
 const label: CSSProperties = { fontSize: 12, color: "var(--c-text-muted)" };
 const input: CSSProperties = {
@@ -137,12 +122,11 @@ const primary: CSSProperties = {
   fontWeight: 600,
   cursor: "pointer"
 };
-const toggle: CSSProperties = {
-  background: "none",
-  border: "none",
+const links: CSSProperties = { display: "flex", justifyContent: "space-between", gap: 12, marginTop: 2 };
+const link: CSSProperties = {
   color: "var(--c-accent-cyan)",
   fontSize: 13,
-  cursor: "pointer"
+  textDecoration: "none"
 };
+const mutedLink: CSSProperties = { ...link, color: "var(--c-text-muted)" };
 const errorText: CSSProperties = { margin: 0, fontSize: 13, color: "var(--c-danger)" };
-const noticeText: CSSProperties = { margin: 0, fontSize: 13, color: "var(--c-success)" };

@@ -8,6 +8,7 @@ dist
 !.env.example
 .turbo
 .vite
+.vercel
 .pnpm-store/
 
 # Local AI-tool state (not shared)
@@ -15,7 +16,8 @@ dist
 .gemini/
 .claude/settings.local.json
 .claude/
-.github/
+.github/*.local
+.github/prompts/
 
 # Throwaway headless-Chrome profiles created by visual validation
 .chrome-visual-validation-*

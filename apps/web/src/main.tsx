@@ -1,14 +1,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { App } from "./App";
-import { AuthGate } from "./auth/AuthGate";
+import { RouteApp } from "./RouteApp";
 import "./theme.css";
 import "./styles.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <AuthGate>
-      <App />
-    </AuthGate>
+    <RouteApp />
   </StrictMode>
 );

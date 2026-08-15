@@ -10,14 +10,14 @@ declare module "fastify" {
 }
 
 // Routes that must work without authentication. Shares are public BY TOKEN.
-function isPublic(url: string): boolean {
+function isPublic(method: string, url: string): boolean {
   const path = url.split("?")[0];
   return (
-    path === "/health" ||
-    path === "/billing/paypal/webhook" ||
-    path === "/shares" ||
-    path.startsWith("/shares/") ||
-    path.startsWith("/preview/") // token-gated runtime preview (loaded in an iframe)
+    (method === "GET" && path === "/health") ||
+    (method === "POST" && path === "/access-requests") ||
+    (method === "POST" && path === "/billing/paypal/webhook") ||
+    (method === "GET" && path.startsWith("/shares/")) ||
+    (method === "GET" && path.startsWith("/preview/")) // token-gated runtime preview (loaded in an iframe)
   );
 }
 
@@ -61,7 +61,7 @@ export function registerAuth(app: FastifyInstance): void {
   }
 
   app.addHook("preHandler", async (request: FastifyRequest, reply: FastifyReply) => {
-    if (isPublic(request.url)) return;
+    if (isPublic(request.method, request.url)) return;
 
     const header = request.headers.authorization;
     const token = header?.startsWith("Bearer ") ? header.slice(7) : null;

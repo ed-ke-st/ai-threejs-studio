@@ -2,6 +2,7 @@
   "name": "ai-threejs-studio",
   "private": true,
   "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "pnpm -r --parallel dev",
@@ -27,11 +28,18 @@
     "@types/react": "^19.1.6",
     "@types/react-dom": "^19.1.5",
     "@types/three": "^0.177.0",
-    "@vitejs/plugin-react": "^4.5.0",
+    "@vitejs/plugin-react": "^4.7.0",
     "postgres": "^3.4.9",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3",
-    "vite": "^6.3.5"
+    "vite": "^6.4.3"
   },
-  "packageManager": "pnpm@10.11.0"
+  "packageManager": "pnpm@10.11.0",
+  "pnpm": {
+    "overrides": {
+      "brace-expansion": "5.0.9",
+      "fast-uri@<3.1.5": "3.1.5",
+      "find-my-way@<9.7.0": "9.7.0"
+    }
+  }
 }

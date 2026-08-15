@@ -1,7 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { BlobStore } from "./blobStore.js";
-import type { MaterializedWorkspace, ProjectFileRecord, ProjectSnapshot, ProjectStorage } from "./localWorkspaceStorage.js";
+import {
+  normalizeProjectFilePath,
+  type MaterializedWorkspace,
+  type ProjectFileRecord,
+  type ProjectSnapshot,
+  type ProjectStorage
+} from "./localWorkspaceStorage.js";
 
 /**
  * Project workspace backed by object storage (canonical source of truth, so any
@@ -95,7 +101,11 @@ export class BlobWorkspaceStorage implements ProjectStorage {
       keys.map(async (key) => {
         const content = await this.blob.get(key);
         if (content === null) return;
-        const abs = path.join(dir, key.slice(prefix.length + 1));
+        const relative = normalizeProjectFilePath(key.slice(prefix.length + 1));
+        const abs = path.resolve(dir, relative);
+        if (!abs.startsWith(`${dir}${path.sep}`)) {
+          throw new Error(`Invalid materialized project path: ${relative}`);
+        }
         await fs.mkdir(path.dirname(abs), { recursive: true });
         await fs.writeFile(abs, content);
       })
@@ -109,7 +119,7 @@ export class BlobWorkspaceStorage implements ProjectStorage {
   }
 
   private normalize(filePath: string): string {
-    return filePath.replace(/^\/+/, "").split("\\").join("/");
+    return normalizeProjectFilePath(filePath);
   }
 
   private fileKey(projectId: string, filePath: string): string {
