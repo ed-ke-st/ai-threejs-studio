@@ -38,6 +38,23 @@ export interface ProjectStorage {
   restoreProjectSnapshot(projectId: string, snapshotId: string): Promise<ProjectSnapshot>;
 }
 
+/**
+ * Canonical, traversal-safe project-relative path used by every storage backend.
+ * Project files are later materialized and processed by build tools, so accepting
+ * dot segments or absolute paths here would cross a security boundary.
+ */
+export function normalizeProjectFilePath(filePath: string): string {
+  const normalized = filePath.replace(/^\/+/, "").split("\\").join("/");
+  if (!normalized || normalized.length > 240 || normalized.includes("\0")) {
+    throw new Error(`Invalid project path: ${filePath}`);
+  }
+  const segments = normalized.split("/");
+  if (segments.some((segment) => !segment || segment === "." || segment === ".." || segment.length > 100)) {
+    throw new Error(`Invalid project path: ${filePath}`);
+  }
+  return segments.join("/");
+}
+
 export class LocalWorkspaceStorage implements ProjectStorage {
   constructor(
     private readonly workspaceRoot: string,
@@ -185,7 +202,7 @@ export class LocalWorkspaceStorage implements ProjectStorage {
 
   private safeProjectPath(projectId: string, filePath: string): string {
     const root = this.projectRoot(projectId);
-    const absolutePath = path.resolve(root, this.normalizeRelativePath(filePath));
+    const absolutePath = path.resolve(root, normalizeProjectFilePath(filePath));
 
     if (!absolutePath.startsWith(`${root}${path.sep}`) && absolutePath !== root) {
       throw new Error(`Invalid project path: ${filePath}`);
@@ -195,7 +212,7 @@ export class LocalWorkspaceStorage implements ProjectStorage {
   }
 
   private normalizeRelativePath(filePath: string): string {
-    return filePath.replace(/^\/+/, "").split("\\").join("/");
+    return normalizeProjectFilePath(filePath);
   }
 
   private safeId(id: string): string {

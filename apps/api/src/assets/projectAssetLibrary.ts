@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 import type { Asset } from "@ai-threejs-studio/shared";
+import { config } from "../config.js";
 import type { BlobStore } from "../storage/blobStore.js";
 
 const SUPPORTED_ASSET_TYPES = new Set<Asset["type"]>(["model/glb", "model/gltf"]);
@@ -25,10 +26,17 @@ export class ProjectAssetLibrary {
     }
 
     const buffer = Buffer.from(input.contentBase64, "base64");
+    if (buffer.byteLength > config.quota.maxAssetBytes) {
+      throw new Error(`Asset is too large (maximum ${Math.floor(config.quota.maxAssetBytes / 1024 / 1024)} MB).`);
+    }
     const now = new Date().toISOString();
     const assetId = nanoid(12);
     const fileName = `${assetId}-${sanitizeFileName(input.name)}`;
     const assets = await this.readIndex(input.projectId);
+    const usedBytes = assets.reduce((total, asset) => total + Number(asset.metadata.byteLength ?? 0), 0);
+    if (usedBytes + buffer.byteLength > config.quota.maxProjectAssetBytes) {
+      throw new Error(`Project asset storage is full (maximum ${Math.floor(config.quota.maxProjectAssetBytes / 1024 / 1024)} MB).`);
+    }
 
     const contentType = input.type === "model/gltf" ? "model/gltf+json" : "model/gltf-binary";
     await this.blob.put(this.fileKey(input.projectId, fileName), buffer, contentType);

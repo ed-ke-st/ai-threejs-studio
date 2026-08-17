@@ -41,4 +41,9 @@ EXPOSE 4000
 # here: Railway rejects it; attach a Railway Volume in the dashboard if you ever
 # want to persist e.g. the RAG index.)
 
+# Keep the API and every user-project build away from root privileges. Only the
+# scratch workspace needs to be writable at runtime.
+RUN mkdir -p /app/.studio && chown -R node:node /app/.studio
+USER node
+
 CMD ["pnpm", "--filter", "@ai-threejs-studio/api", "start"]

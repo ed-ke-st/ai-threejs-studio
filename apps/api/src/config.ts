@@ -58,9 +58,8 @@ export const config = {
   host: process.env.API_HOST ?? "127.0.0.1",
   // PORT is the cloud convention (Railway/Render inject it); fall back to API_PORT.
   port: Number(process.env.PORT ?? process.env.API_PORT ?? 4000),
-  // Restrict browser cross-origin access (comma-separated origins). Unset = allow
-  // any origin — fine when the web app reaches the API via a same-origin proxy
-  // (e.g. the Vercel /api rewrite), where CORS isn't triggered.
+  // Restrict browser cross-origin access (comma-separated origins). Unset denies
+  // cross-origin browser calls; the Vercel /api proxy remains same-origin.
   corsOrigin: process.env.CORS_ORIGIN?.split(",").map((o) => o.trim()).filter(Boolean),
   publicApiBaseUrl: process.env.PUBLIC_API_BASE_URL ?? `http://${process.env.API_HOST ?? "127.0.0.1"}:${Number(process.env.API_PORT ?? 4000)}`,
   previewHost: process.env.PREVIEW_HOST ?? "127.0.0.1",
@@ -147,9 +146,20 @@ export const config = {
   // Per-user daily quotas (multi-tenant only). Protect server resources now, and
   // become the cost cap if platform/test tokens are ever enabled. <= 0 = unlimited.
   quota: {
-    agentRunsPerDay: Number(process.env.QUOTA_AGENT_RUNS_PER_DAY ?? 100),
-    buildsPerDay: Number(process.env.QUOTA_BUILDS_PER_DAY ?? 200)
+    agentRunsPerDay: Number(process.env.QUOTA_AGENT_RUNS_PER_DAY ?? 5),
+    buildsPerDay: Number(process.env.QUOTA_BUILDS_PER_DAY ?? 20),
+    projectsPerUser: Number(process.env.QUOTA_PROJECTS_PER_USER ?? 3),
+    snapshotsPerProject: Number(process.env.QUOTA_SNAPSHOTS_PER_PROJECT ?? 20),
+    sharesPerProject: Number(process.env.QUOTA_SHARES_PER_PROJECT ?? 10),
+    maxAssetBytes: Number(process.env.MAX_ASSET_BYTES ?? 20 * 1024 * 1024),
+    maxProjectAssetBytes: Number(process.env.MAX_PROJECT_ASSET_BYTES ?? 100 * 1024 * 1024),
+    maxProjectFileBytes: Number(process.env.MAX_PROJECT_FILE_BYTES ?? 1024 * 1024)
   },
+  rateLimit: {
+    requestsPerMinute: Number(process.env.RATE_LIMIT_REQUESTS_PER_MINUTE ?? 180),
+    accessRequestsPerHour: Number(process.env.RATE_LIMIT_ACCESS_REQUESTS_PER_HOUR ?? 5)
+  },
+  turnstileSecretKey: process.env.TURNSTILE_SECRET_KEY,
   billing: {
     freeCredits: Number(process.env.FREE_GENERATION_CREDITS ?? 3),
     packages: parseCreditPackages(process.env.CREDIT_PACKAGES_JSON),

@@ -1,5 +1,7 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
+import rateLimit from "@fastify/rate-limit";
 import { config, validateConfig } from "./config.js";
 import { ProjectAssetLibrary } from "./assets/projectAssetLibrary.js";
 import { ProjectExportService } from "./export/projectExport.js";
@@ -39,12 +41,27 @@ for (const warning of validateConfig()) {
 }
 
 await app.register(cors, {
-  origin: config.corsOrigin ?? true
+  origin: config.corsOrigin ?? false
+});
+
+await app.register(helmet, {
+  // Public scene bundles get a dedicated sandbox policy in routes.ts. The API
+  // otherwise returns JSON/binary responses and does not need a global CSP.
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false
 });
 
 // Resolves request.userId (Supabase JWT in multi-tenant mode; constant local owner
 // otherwise). Must run before the routes so ownership checks have a user.
 registerAuth(app);
+
+await app.register(rateLimit, {
+  global: true,
+  hook: "preHandler",
+  max: config.rateLimit.requestsPerMinute,
+  timeWindow: "1 minute",
+  keyGenerator: (request) => request.userId || request.ip
+});
 
 const settingsRepository = await createSettingsRepository();
 const usageService = createUsageService();

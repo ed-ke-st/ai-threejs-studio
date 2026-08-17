@@ -22,12 +22,14 @@ import type { BillingService, CreditReservation } from "./billing.js";
 import { requireAdmin } from "./admin.js";
 import type { PreviewRunner } from "./preview/previewRunner.js";
 import type { LocalRagService } from "./rag/localRagService.js";
-import type { ProjectStorage } from "./storage/localWorkspaceStorage.js";
+import { normalizeProjectFilePath, type ProjectStorage } from "./storage/localWorkspaceStorage.js";
 import { getBlobStore, putDir } from "./storage/blobStore.js";
 import { getSql } from "./db.js";
+import { projectSourcePolicyViolation } from "./security/projectSourcePolicy.js";
+import { escapeHtmlText } from "./security/htmlText.js";
 
 const createProjectSchema = z.object({
-  name: z.string().min(1).default("Untitled Project"),
+  name: z.string().trim().min(1).max(80).default("Untitled Project"),
   templateId: z
     .enum(["blank-r3f-scene", "glb-viewer", "product-configurator", "room-scene", "interactive-planner"])
     .default("blank-r3f-scene")
@@ -38,7 +40,7 @@ const writeFileSchema = z.object({
 });
 
 const searchDocsSchema = z.object({
-  query: z.string().min(1),
+  query: z.string().min(1).max(500),
   collections: z.array(z.string()).optional(),
   limit: z.number().int().min(1).max(20).optional(),
   projectId: z.string().min(1).optional()
@@ -57,6 +59,14 @@ const referenceImageSchema = z
 
 const createSnapshotSchema = z.object({
   label: z.string().min(1).max(80).optional()
+});
+
+const accessRequestSchema = z.object({
+  email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
+  name: z.string().trim().max(80).optional().default(""),
+  useCase: z.string().trim().max(1_000).optional().default(""),
+  website: z.string().max(200).optional().default(""),
+  turnstileToken: z.string().max(2_048).optional().default("")
 });
 
 const vector3Schema = z.tuple([z.number(), z.number(), z.number()]);
@@ -206,6 +216,40 @@ export function registerRoutes(
 ): void {
   const blobStore = getBlobStore();
 
+  function editableProjectPath(filePath: string): string | null {
+    try {
+      const normalized = normalizeProjectFilePath(filePath);
+      const parts = normalized.split("/");
+      const extension = normalized.slice(normalized.lastIndexOf(".")).toLowerCase();
+      const allowedExtensions = new Set([".ts", ".tsx", ".js", ".jsx", ".css", ".json", ".glsl", ".vert", ".frag"]);
+      if (!normalized.startsWith("src/") || parts.some((part) => part.startsWith(".") || part === "node_modules")) return null;
+      return allowedExtensions.has(extension) ? normalized : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function consumeBuildQuota(request: { userId: string }, reply: import("fastify").FastifyReply): Promise<boolean> {
+    const quota = await usageService.consume(request.userId, "build");
+    if (quota.allowed) return true;
+    reply.code(429).send({ error: `Daily build limit reached (${quota.limit}/day). Try again tomorrow.` });
+    return false;
+  }
+
+  async function verifyTurnstile(token: string, remoteIp: string): Promise<boolean> {
+    if (!config.turnstileSecretKey) return true;
+    if (!token) return false;
+    const body = new URLSearchParams({ secret: config.turnstileSecretKey, response: token, remoteip: remoteIp });
+    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body
+    });
+    if (!response.ok) return false;
+    const result = (await response.json()) as { success?: boolean };
+    return result.success === true;
+  }
+
   // Loads a project and enforces ownership. On a missing OR not-owned project it
   // sends 404 (not 403, so project ids aren't probeable) and returns null — the
   // caller should `if (!project) return;`.
@@ -233,15 +277,32 @@ export function registerRoutes(
       return reply.code(404).send({ error: "Not found" });
     }
     const key = `${prefix}/${relative}`;
+    const isPublicShare = prefix.startsWith("shares/");
+    const securePublicShare = () => {
+      if (!isPublicShare) return;
+      reply.header(
+        "content-security-policy",
+        "sandbox allow-scripts allow-downloads; default-src 'self' data: blob: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https:; style-src 'self' 'unsafe-inline' data: https:; img-src 'self' data: blob: https:; connect-src https:; frame-ancestors *;"
+      );
+      reply.header("permissions-policy", "camera=(), microphone=(), geolocation=(), payment=()");
+      reply.header("referrer-policy", "no-referrer");
+      reply.header("x-content-type-options", "nosniff");
+    };
     if (relative !== "index.html") {
       const url = await blobStore.signedUrl(key, 3600).catch(() => null);
       if (url) return reply.redirect(url);
     }
     try {
       const content = await blobStore.get(key);
-      if (content) return reply.type(shareContentType(relative)).send(content);
+      if (content) {
+        if (relative === "index.html") securePublicShare();
+        return reply.type(shareContentType(relative)).send(content);
+      }
       const index = await blobStore.get(`${prefix}/index.html`);
-      if (index) return reply.type("text/html; charset=utf-8").send(index);
+      if (index) {
+        securePublicShare();
+        return reply.type("text/html; charset=utf-8").send(index);
+      }
     } catch {
       // fall through to 404
     }
@@ -265,12 +326,17 @@ export function registerRoutes(
   // The preview is "fresh" when it was built from the project's current version.
   // The marker stores the project.updatedAt the dist was built from (storage-backend
   // agnostic, unlike a local-file mtime). Returns the build only when it failed.
-  async function ensureStaticPreview(id: string, rawVersion: string): Promise<{ session?: PreviewSession; build?: BuildResult }> {
+  async function ensureStaticPreview(
+    id: string,
+    rawVersion: string,
+    beforeBuild?: () => Promise<boolean>
+  ): Promise<{ session?: PreviewSession; build?: BuildResult; quotaExceeded?: boolean }> {
     // The format tag invalidates previews built by older code (e.g. the ones
     // uploaded before per-file content-types) so they get rebuilt, not reused.
     const version = `f2:${rawVersion}`;
     const builtVersion = (await blobStore.get(`preview-meta/${id}`))?.toString("utf8");
     if (builtVersion !== version) {
+      if (beforeBuild && !(await beforeBuild())) return { quotaExceeded: true };
       const { build, distDir, dispose } = await previewRunner.buildAndKeep(id, { base: "./" });
       try {
         if (!build.ok) return { build };
@@ -289,6 +355,37 @@ export function registerRoutes(
     time: new Date().toISOString()
   }));
 
+  app.post(
+    "/access-requests",
+    {
+      config: {
+        rateLimit: {
+          max: config.rateLimit.accessRequestsPerHour,
+          timeWindow: "1 hour"
+        }
+      }
+    },
+    async (request, reply) => {
+      const parsed = accessRequestSchema.safeParse(request.body ?? {});
+      if (!parsed.success) return reply.code(400).send({ error: "Enter a valid email address." });
+      // Honeypot submissions receive the same response without touching storage.
+      if (parsed.data.website) return reply.code(202).send({ ok: true });
+      if (!(await verifyTurnstile(parsed.data.turnstileToken, request.ip))) {
+        return reply.code(400).send({ error: "Human verification failed. Please try again." });
+      }
+      if (!config.supabaseDbUrl) return reply.code(503).send({ error: "Access requests are not configured." });
+      await getSql()`
+        insert into access_requests (email, name, use_case, source, updated_at)
+        values (${parsed.data.email}, ${parsed.data.name || null}, ${parsed.data.useCase || null}, 'landing', now())
+        on conflict (email) do update set
+          name = excluded.name,
+          use_case = excluded.use_case,
+          updated_at = now()
+      `;
+      return reply.code(202).send({ ok: true });
+    }
+  );
+
   // Scene3D agent: structured generate -> validate -> build -> visual-validate ->
   // repair. Writes the Scene3D-backed source set (shared interpreter + config).
   app.post("/projects/:id/scene3d/agent-run", async (request, reply) => {
@@ -297,7 +394,7 @@ export function registerRoutes(
     if (!project) return;
     const body = z
       .object({
-        prompt: z.string().min(1),
+        prompt: z.string().min(1).max(8_000),
         mode: z.enum(["new", "refine"]).optional(),
         selectedObjectId: z.string().min(1).optional(),
         stream: z.boolean().optional(),
@@ -479,6 +576,12 @@ export function registerRoutes(
     await assetLibrary.deleteProjectAssets(id);
     await blobStore.deletePrefix(`previews/${id}`);
     await blobStore.delete(`preview-meta/${id}`);
+    if (config.supabaseDbUrl) {
+      const shares = await getSql()<Array<{ id: string }>>`
+        select id from project_shares where project_id = ${id} and owner_id = ${request.userId}
+      `;
+      await Promise.all(shares.map((share) => blobStore.deletePrefix(`shares/${share.id}`)));
+    }
     await projectRepository.deleteProject(id);
 
     return reply.code(204).send();
@@ -717,6 +820,10 @@ export function registerRoutes(
 
   app.post("/projects", async (request, reply) => {
     const input = createProjectSchema.parse(request.body ?? {});
+    const projects = await projectRepository.listProjects(request.userId);
+    if (config.quota.projectsPerUser > 0 && projects.length >= config.quota.projectsPerUser) {
+      return reply.code(429).send({ error: `Beta accounts can keep up to ${config.quota.projectsPerUser} projects.` });
+    }
     const project = await projectRepository.createProject({ ...input, ownerId: request.userId });
 
     // New projects are Scene3D-backed: base project files (build config, entry,
@@ -727,7 +834,8 @@ export function registerRoutes(
       files.set(file.path, file.content);
     }
     for (const [filePath, content] of files) {
-      await storage.writeProjectFile(project.id, filePath, content.replaceAll("__PROJECT_NAME__", project.name));
+      const replacement = filePath === "index.html" ? escapeHtmlText(project.name) : project.name;
+      await storage.writeProjectFile(project.id, filePath, content.replaceAll("__PROJECT_NAME__", replacement));
     }
 
     await storage.createProjectSnapshot(project.id, "initial");
@@ -805,8 +913,20 @@ export function registerRoutes(
 
     if (!project) return;
 
+    const safePath = editableProjectPath(filePath);
+    if (!safePath) {
+      return reply.code(403).send({ error: "Only source files under src/ can be edited in hosted mode." });
+    }
     const body = writeFileSchema.parse(request.body ?? {});
-    const file = await storage.writeProjectFile(id, filePath, body.content);
+    if (Buffer.byteLength(body.content, "utf8") > config.quota.maxProjectFileBytes) {
+      return reply.code(413).send({ error: "Project file is too large." });
+    }
+    const policyViolation = projectSourcePolicyViolation(safePath, body.content);
+    if (policyViolation) return reply.code(422).send({ error: policyViolation });
+    const file = await storage.writeProjectFile(id, safePath, body.content);
+    // A live local preview may otherwise hot-reload an edit before the source
+    // policy gets another chance to validate the workspace.
+    previewRunner.stop(id);
     await projectRepository.touchProject(id);
     return reply.code(200).send({ file });
   });
@@ -827,6 +947,10 @@ export function registerRoutes(
 
     if (!project) return;
 
+    const snapshots = await storage.listProjectSnapshots(id);
+    if (config.quota.snapshotsPerProject > 0 && snapshots.length >= config.quota.snapshotsPerProject) {
+      return reply.code(429).send({ error: `A project can keep up to ${config.quota.snapshotsPerProject} snapshots.` });
+    }
     const body = createSnapshotSchema.parse(request.body ?? {});
     const snapshot = await storage.createProjectSnapshot(id, normalizeSnapshotLabel(body.label) ?? nanoid(12));
     await projectRepository.touchProject(id);
@@ -840,6 +964,7 @@ export function registerRoutes(
     if (!project) return;
 
     const snapshot = await storage.restoreProjectSnapshot(id, snapshotId);
+    previewRunner.stop(id);
     await projectRepository.touchProject(id);
     return { snapshot: { id: snapshot.id, createdAt: snapshot.createdAt } };
   });
@@ -851,7 +976,8 @@ export function registerRoutes(
     if (!project) return;
 
     if (config.previewMode === "static") {
-      const { session, build } = await ensureStaticPreview(id, project.updatedAt);
+      const { session, build, quotaExceeded } = await ensureStaticPreview(id, project.updatedAt, () => consumeBuildQuota(request, reply));
+      if (quotaExceeded) return;
       if (!session) return reply.code(422).send({ build });
       return { preview: session };
     }
@@ -895,10 +1021,7 @@ export function registerRoutes(
 
     if (!project) return;
 
-    const quota = await usageService.consume(request.userId, "build");
-    if (!quota.allowed) {
-      return reply.code(429).send({ error: `Daily build limit reached (${quota.limit}/day). Try again tomorrow.` });
-    }
+    if (!(await consumeBuildQuota(request, reply))) return;
 
     const build = await previewRunner.build(id);
     return reply.code(build.ok ? 200 : 422).send({ build });
@@ -923,6 +1046,8 @@ export function registerRoutes(
 
     if (!project) return;
 
+    if (!(await consumeBuildQuota(request, reply))) return;
+
     const result = await projectExportService.exportBuild(project);
 
     if (result.build && !result.build.ok) {
@@ -940,6 +1065,17 @@ export function registerRoutes(
     const project = await requireOwnedProject(request, reply, id);
 
     if (!project) return;
+
+    if (!(await consumeBuildQuota(request, reply))) return;
+
+    if (config.supabaseDbUrl && config.quota.sharesPerProject > 0) {
+      const [row] = await getSql()<{ count: string }[]>`
+        select count(*)::text as count from project_shares where project_id = ${id} and owner_id = ${request.userId}
+      `;
+      if (Number(row?.count ?? 0) >= config.quota.sharesPerProject) {
+        return reply.code(429).send({ error: `A project can keep up to ${config.quota.sharesPerProject} share links.` });
+      }
+    }
 
     // Build a self-contained static bundle (relative asset paths) and upload it to
     // object storage. The shared scene renders with no dev server.
@@ -962,7 +1098,48 @@ export function registerRoutes(
       url: `${origin}/shares/${shareId}/`,
       createdAt: new Date().toISOString()
     };
+    if (config.supabaseDbUrl) {
+      try {
+        await getSql()`
+          insert into project_shares (id, project_id, owner_id, url)
+          values (${share.id}, ${share.projectId}, ${request.userId}, ${share.url})
+        `;
+      } catch (error) {
+        await blobStore.deletePrefix(`shares/${shareId}`).catch(() => {});
+        throw error;
+      }
+    }
     return reply.code(201).send({ share });
+  });
+
+  app.get("/projects/:id/shares", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = await requireOwnedProject(request, reply, id);
+    if (!project) return;
+    if (!config.supabaseDbUrl) return { shares: [] };
+    const rows = await getSql()<Array<{ id: string; project_id: string; url: string; created_at: Date }>>`
+      select id, project_id, url, created_at
+      from project_shares
+      where project_id = ${id} and owner_id = ${request.userId}
+      order by created_at desc
+    `;
+    return {
+      shares: rows.map((row) => ({ id: row.id, projectId: row.project_id, url: row.url, createdAt: row.created_at.toISOString() }))
+    };
+  });
+
+  app.delete("/projects/:id/shares/:shareId", async (request, reply) => {
+    const { id, shareId } = request.params as { id: string; shareId: string };
+    const project = await requireOwnedProject(request, reply, id);
+    if (!project) return;
+    if (!config.supabaseDbUrl) return reply.code(404).send({ error: "Share not found" });
+    const result = await getSql()`
+      delete from project_shares
+      where id = ${shareId} and project_id = ${id} and owner_id = ${request.userId}
+    `;
+    if (result.count === 0) return reply.code(404).send({ error: "Share not found" });
+    await blobStore.deletePrefix(`shares/${shareId}`);
+    return reply.code(204).send();
   });
 }
 

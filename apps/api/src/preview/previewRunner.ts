@@ -4,6 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { BuildResult, PreviewSession, VisualValidationResult } from "@ai-threejs-studio/shared";
 import type { MaterializedWorkspace } from "../storage/localWorkspaceStorage.js";
 import { runVisualValidation } from "./visualValidation.js";
+import { assertWorkspaceSourcePolicy } from "../security/projectSourcePolicy.js";
 
 interface PreviewRunnerOptions {
   host: string;
@@ -102,6 +103,7 @@ export class PreviewRunner {
     projectId: string,
     dispose?: () => Promise<void>
   ): Promise<PreviewSession> {
+    await assertWorkspaceSourcePolicy(workspacePath);
     const existing = this.sessions.get(sessionKey);
 
     if (existing && existing.status !== "stopped" && existing.status !== "failed") {
@@ -136,11 +138,7 @@ export class PreviewRunner {
 
     const child = spawn(process.execPath, [this.options.viteBinPath, "--host", this.options.host, "--port", String(port), "--strictPort"], {
       cwd: workspacePath,
-      env: {
-        ...process.env,
-        BROWSER: "none",
-        FORCE_COLOR: "0"
-      }
+      env: { ...restrictedBuildEnv(), BROWSER: "none" }
     });
 
     session.process = child;
@@ -266,6 +264,20 @@ export class PreviewRunner {
   async buildWorkspace(workspacePath: string, options?: { base?: string }): Promise<BuildResult> {
     const startedAt = new Date().toISOString();
     return this.heavyJobs.run(async () => {
+    try {
+      await assertWorkspaceSourcePolicy(workspacePath);
+    } catch (error) {
+      const logs = error instanceof Error ? error.message : "Project source policy blocked the build.";
+      return {
+        ok: false,
+        buildOk: false,
+        command: "source-policy",
+        logs,
+        errorSummary: logs,
+        startedAt,
+        finishedAt: new Date().toISOString()
+      };
+    }
     const typecheck = await runCommand(workspacePath, "typecheck", process.execPath, [
       requireResolve("typescript/bin/tsc"),
       "-b",
@@ -298,6 +310,17 @@ export class PreviewRunner {
 
   async validateWorkspaceVisual(workspacePath: string): Promise<VisualValidationResult> {
     return this.heavyJobs.run(async () => {
+    try {
+      await assertWorkspaceSourcePolicy(workspacePath);
+    } catch (error) {
+      return {
+        status: "failed",
+        ok: false,
+        screenshotCaptured: false,
+        findings: [{ code: "source-policy", message: error instanceof Error ? error.message : "Project source policy blocked validation.", severity: "error" }],
+        logs: error instanceof Error ? error.message : "Project source policy blocked validation."
+      };
+    }
     let port = this.pool.acquire();
     if (port === undefined) {
       // Free a slot by evicting the least-recently-used live preview.
@@ -392,13 +415,22 @@ interface CommandResult {
   logs: string;
 }
 
+/** Build subprocesses must never inherit API, database, billing, or encryption secrets. */
+function restrictedBuildEnv(): NodeJS.ProcessEnv {
+  return {
+    CI: "1",
+    FORCE_COLOR: "0",
+    NODE_ENV: "production",
+    PATH: process.env.PATH,
+    TMPDIR: process.env.TMPDIR,
+    SYSTEMROOT: process.env.SYSTEMROOT
+  };
+}
+
 async function runCommand(workspacePath: string, label: string, command: string, args: string[]): Promise<CommandResult> {
   const child = spawn(command, args, {
     cwd: workspacePath,
-    env: {
-      ...process.env,
-      FORCE_COLOR: "0"
-    }
+    env: restrictedBuildEnv()
   });
   let logs = "";
 
@@ -444,11 +476,7 @@ async function startWorkspacePreview(
 
   const child = spawn(process.execPath, [viteBinPath, "--host", host, "--port", String(port), "--strictPort"], {
     cwd: workspacePath,
-    env: {
-      ...process.env,
-      BROWSER: "none",
-      FORCE_COLOR: "0"
-    }
+    env: { ...restrictedBuildEnv(), BROWSER: "none" }
   });
 
   session.process = child;
