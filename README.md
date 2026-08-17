@@ -7,6 +7,7 @@ can keep.
 
 [View the private-beta landing page](https://ai-threejs-studio-web.vercel.app/) ·
 [Request beta access](https://ai-threejs-studio-web.vercel.app/request-access) ·
+[Use the MCP server](docs/mcp.md) ·
 [Read the architecture](docs/architecture.md)
 
 > The hosted editor is invite-only while build isolation and usage controls are
@@ -18,6 +19,7 @@ can keep.
 - Combines a scene hierarchy, visual inspector, prompt workflow, and live preview.
 - Handles GLB/glTF models, textures, HDRIs, and project-level asset storage.
 - Produces sandboxed share previews and exportable project source.
+- Exposes guarded Scene3D authoring tools to local MCP clients such as Codex.
 - Supports local single-user development or Supabase-backed multi-tenant accounts.
 
 ## Stack
@@ -26,6 +28,8 @@ can keep.
   `drei`), inspector, chat/agent panel, Monaco-based file view, live preview.
 - **`apps/api`** — Fastify API: project CRUD, file/asset operations,
   snapshots, and the scene agent (Claude, OpenAI, or Gemini).
+- **`apps/mcp`** — local STDIO MCP server: guarded project, Scene3D, build,
+  and preview tools backed by the existing API.
 - **`packages/shared`** — shared TypeScript contracts.
 - **`packages/scene3d`** — the structured Scene3D JSON schema and helpers.
 - **`packages/agent-tools`** — internal agent tool interfaces (MCP-ready).
@@ -44,7 +48,7 @@ Requires Node 22+ and [pnpm](https://pnpm.io) 10.
 
 ```bash
 pnpm install
-cp .env.example .env   # fill in at least one AI provider key
+cp .env.example .env   # provider keys are only needed for in-app AI generation
 pnpm dev                # runs web + api together
 ```
 
@@ -65,6 +69,22 @@ Copy `.env.example` to `.env` and set what you need:
 
 Everything else has a sane default for local development.
 
+## MCP authoring without provider API keys
+
+The local MCP server lets an MCP-capable client author Studio scenes using the
+model available through that client. The Studio API still owns authentication,
+project validation, snapshots, builds, and previews; the MCP process never gets
+shell access or arbitrary source-file tools.
+
+Start the Studio normally with `pnpm dev`, then add the STDIO command to your
+MCP client. A local single-user API needs no access token. Supabase-backed APIs
+require the current user's bearer access token.
+
+See [`docs/mcp.md`](docs/mcp.md) for the complete Codex/ChatGPT configuration,
+available tools, hosted setup, and security boundaries. The editor's built-in
+Generate/Revise buttons remain provider-API features; MCP authoring is the
+subscription-backed alternative.
+
 ## Hosted architecture
 
 The beta web client runs on Vercel, the authenticated API and isolated preview
@@ -81,6 +101,7 @@ content-security policy. If you find a vulnerability, see
 ## Scripts
 
 - `pnpm dev` — run all apps in watch mode
+- `pnpm mcp` — run the local Studio MCP server over STDIO
 - `pnpm build` — build all apps/packages
 - `pnpm typecheck` / `pnpm lint` — type-check the workspace
 - `pnpm --filter @ai-threejs-studio/api test` — API security and crypto tests
@@ -89,6 +110,7 @@ content-security policy. If you find a vulnerability, see
 ## Docs
 
 - [`docs/architecture.md`](docs/architecture.md) — package layout, agent providers
+- [`docs/mcp.md`](docs/mcp.md) — local MCP server setup and tool reference
 - [`docs/feature-roadmap.md`](docs/feature-roadmap.md) — planned work
 - [`docs/accounts-migration-plan.md`](docs/accounts-migration-plan.md) — Supabase accounts migration
 - [`docs/billing-live-readiness.md`](docs/billing-live-readiness.md) — going live with PayPal billing

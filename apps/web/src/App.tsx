@@ -109,7 +109,7 @@ export function App() {
 
 
 
-      <main className={styles.main}>
+      <main className={showSettings || showAdmin ? `${styles.main} ${styles.mainScrollable}` : styles.main}>
         {showAdmin ? (
           <AdminPanel />
         ) : showSettings ? (

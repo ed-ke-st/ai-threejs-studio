@@ -366,6 +366,14 @@
   min-height: 0;
 }
 
+.mainScrollable {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
 .statusbar {
   display: flex;
   align-items: center;
@@ -450,6 +458,7 @@
 
 /* Settings panel */
 .settings {
+  width: min(520px, calc(100% - 32px));
   padding: 24px;
   max-width: 520px;
   color: #dce6f2;

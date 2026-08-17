@@ -41,6 +41,8 @@ continue to work while public user signup is disabled.
   `TURNSTILE_SECRET_KEY` on Railway when request volume warrants CAPTCHA.
 - The API defaults to five access requests per IP per hour and 180 total requests
   per identity/IP per minute.
+- `QUOTA_PROJECTS_PER_USER` applies to normal accounts; profiles with the
+  trusted `admin` role are exempt from the project-count cap.
 - Review Railway CPU/memory and Supabase storage before raising project, build,
   asset, snapshot, or share limits.
 
