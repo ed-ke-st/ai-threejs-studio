@@ -16,19 +16,19 @@
     "@ai-threejs-studio/scene3d": "workspace:*",
     "@ai-threejs-studio/shared": "workspace:*",
     "@ai-threejs-studio/three-templates": "workspace:*",
-    "@anthropic-ai/sdk": "^0.100.1",
+    "@anthropic-ai/sdk": "^0.117.1",
     "@fastify/cors": "^11.3.0",
     "@fastify/helmet": "^13.1.0",
     "@fastify/rate-limit": "^11.2.0",
     "@supabase/supabase-js": "^2.107.0",
     "archiver": "^8.0.0",
-    "dotenv": "^16.5.0",
+    "dotenv": "^17.4.2",
     "fastify": "^5.12.0",
     "jose": "^6.2.3",
-    "nanoid": "^5.1.16",
+    "nanoid": "^6.0.1",
     "pino-pretty": "^13.0.0",
     "postgres": "^3.4.9",
-    "zod": "^3.25.42"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/archiver": "^7.0.0",
