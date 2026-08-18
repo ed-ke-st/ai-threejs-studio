@@ -14,7 +14,7 @@
     "@ai-threejs-studio/scene3d": "workspace:*",
     "@ai-threejs-studio/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "zod": "^3.25.42"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "tsx": "^4.19.4",
