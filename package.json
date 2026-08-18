@@ -6,9 +6,11 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm -r --parallel dev",
+    "mcp": "node --import tsx apps/mcp/src/index.ts",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
+    "test:mcp": "pnpm --filter @ai-threejs-studio/mcp-server test",
     "rag:ingest": "tsx scripts/ingest-seed-docs.ts"
   },
   "dependencies": {

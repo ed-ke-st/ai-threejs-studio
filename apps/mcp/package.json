@@ -1,0 +1,23 @@
+{
+  "name": "@ai-threejs-studio/mcp-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node --import tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test src/*.test.ts"
+  },
+  "dependencies": {
+    "@ai-threejs-studio/scene3d": "workspace:*",
+    "@ai-threejs-studio/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.42"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

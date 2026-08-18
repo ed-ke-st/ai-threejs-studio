@@ -19,7 +19,8 @@ import type { ProjectRepository } from "./projects.js";
 import type { SettingsRepository } from "./settings.js";
 import type { QuotaStatus, UsageService } from "./usage.js";
 import type { BillingService, CreditReservation } from "./billing.js";
-import { requireAdmin } from "./admin.js";
+import { getAdminProfile, requireAdmin } from "./admin.js";
+import { exceedsProjectQuota } from "./quota.js";
 import type { PreviewRunner } from "./preview/previewRunner.js";
 import type { LocalRagService } from "./rag/localRagService.js";
 import { normalizeProjectFilePath, type ProjectStorage } from "./storage/localWorkspaceStorage.js";
@@ -822,7 +823,10 @@ export function registerRoutes(
     const input = createProjectSchema.parse(request.body ?? {});
     const projects = await projectRepository.listProjects(request.userId);
     if (config.quota.projectsPerUser > 0 && projects.length >= config.quota.projectsPerUser) {
-      return reply.code(429).send({ error: `Beta accounts can keep up to ${config.quota.projectsPerUser} projects.` });
+      const profile = await getAdminProfile(request.userId);
+      if (exceedsProjectQuota(projects.length, config.quota.projectsPerUser, profile?.role ?? null)) {
+        return reply.code(429).send({ error: `Beta accounts can keep up to ${config.quota.projectsPerUser} projects.` });
+      }
     }
     const project = await projectRepository.createProject({ ...input, ownerId: request.userId });
 
