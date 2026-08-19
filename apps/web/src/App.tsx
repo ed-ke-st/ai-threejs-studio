@@ -6,6 +6,7 @@ import { ProjectMenu } from "./ProjectMenu";
 import { ProjectToolbar } from "./ProjectToolbar";
 import { CloseIcon, SettingsIcon } from "./ui/icons";
 import { authEnabled, supabase } from "./auth/supabaseClient";
+import { McpConnectSection } from "./settings/McpConnectSection";
 import { MODEL_CHOICES, type AdminBillingOrder, type AppSettingsUpdate, type BillingOrder, type CreditPackage } from "@ai-threejs-studio/shared";
 import styles from "./App.module.css";
 
@@ -480,6 +481,8 @@ function SettingsPanel() {
           </button>
         </span>
       </label>
+
+      <McpConnectSection />
     </div>
   );
 }

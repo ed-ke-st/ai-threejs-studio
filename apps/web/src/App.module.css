@@ -651,6 +651,49 @@ button.packageCard {
   border-top: 1px solid var(--c-border-soft);
 }
 
+.mcpCodeRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.mcpCode {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--c-bg-shell);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  color: var(--c-text);
+  font-size: 11px;
+}
+
+.mcpHint {
+  margin: 4px 0 0;
+  color: var(--c-text-muted);
+  font-size: 11px;
+}
+
+.mcpSummary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--c-text);
+}
+
+.mcpToolList {
+  margin: 8px 0;
+  padding-left: 18px;
+  color: var(--c-text-muted);
+  font-size: 11px;
+}
+
+.mcpToolList li {
+  margin-bottom: 2px;
+}
+
 .adminPanel {
   width: min(1120px, calc(100vw - 32px));
   margin: 1rem auto;
