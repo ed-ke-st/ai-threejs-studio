@@ -12,6 +12,13 @@ import styles from "../App.module.css";
 
 const LOCAL_CONFIG = "AI_THREEJS_STUDIO_API_URL=http://127.0.0.1:4000";
 
+// apps/mcp talks to this origin directly (no /api prefix, see apps/mcp/src/api.ts),
+// bypassing the browser's same-origin Vercel proxy (apps/web/vercel.json rewrites
+// /api/* to this same Railway origin). window.location.origin is the Vercel domain,
+// not this one, so it would send MCP requests into the SPA fallback instead of the
+// API. Override with VITE_MCP_API_URL if the Railway origin ever changes.
+const HOSTED_API_URL = import.meta.env.VITE_MCP_API_URL?.trim() || "https://ai-threejs-studioapi-production.up.railway.app";
+
 export function McpConnectSection() {
   return (
     <section className={styles.billingCard}>
@@ -62,7 +69,6 @@ function LocalConfig() {
 
 function HostedConfig() {
   const [tokenStatus, setTokenStatus] = useState<"idle" | "copied" | "empty" | "error">("idle");
-  const origin = window.location.origin;
 
   const copyToken = async () => {
     if (!supabase) return;
@@ -83,7 +89,7 @@ function HostedConfig() {
   return (
     <div>
       <p className={styles.mcpHint}>Point your MCP client at this deployment and provide your current session token:</p>
-      <CopyBlock value={`AI_THREEJS_STUDIO_API_URL=${origin}`} />
+      <CopyBlock value={`AI_THREEJS_STUDIO_API_URL=${HOSTED_API_URL}`} />
       <div className={styles.settingRow}>
         <span>AI_THREEJS_STUDIO_ACCESS_TOKEN</span>
         <span className={styles.settingControl}>
