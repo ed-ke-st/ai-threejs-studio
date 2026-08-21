@@ -10,7 +10,40 @@ import { useState } from "react";
 import { authEnabled, supabase } from "../auth/supabaseClient";
 import styles from "../App.module.css";
 
-const LOCAL_CONFIG = "AI_THREEJS_STUDIO_API_URL=http://127.0.0.1:4000";
+const REPO_PATH_KEY = "studio:mcpRepoPath";
+const REPO_PATH_PLACEHOLDER = "/absolute/path/to/ai-threejs-studio";
+
+function loadRepoPath(): string {
+  try {
+    return localStorage.getItem(REPO_PATH_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function saveRepoPath(value: string): void {
+  try {
+    if (value) localStorage.setItem(REPO_PATH_KEY, value);
+    else localStorage.removeItem(REPO_PATH_KEY);
+  } catch {
+    // localStorage unavailable — the field just won't remember the path.
+  }
+}
+
+// Matches the Codex config in docs/mcp.md exactly, so the two stay in sync.
+function localMcpConfig(repoPath: string): string {
+  return `[mcp_servers.ai_threejs_studio]
+command = "pnpm"
+args = [
+  "--silent",
+  "--dir",
+  "${repoPath || REPO_PATH_PLACEHOLDER}",
+  "mcp"
+]
+
+[mcp_servers.ai_threejs_studio.env]
+AI_THREEJS_STUDIO_API_URL = "http://127.0.0.1:4000"`;
+}
 
 // apps/mcp talks to this origin directly (no /api prefix, see apps/mcp/src/api.ts),
 // bypassing the browser's same-origin Vercel proxy (apps/web/vercel.json rewrites
@@ -57,12 +90,30 @@ export function McpConnectSection() {
 }
 
 function LocalConfig() {
+  const [repoPath, setRepoPath] = useState(loadRepoPath);
+
+  const onRepoPathChange = (value: string) => {
+    setRepoPath(value);
+    saveRepoPath(value);
+  };
+
   return (
     <div>
       <p className={styles.mcpHint}>
-        Run <code>pnpm dev</code> in the repo, then point your MCP client at:
+        Run <code>pnpm dev</code> in the repo, then add this to your MCP client's config (Codex shown; other clients
+        use the same command/args/env in their own format):
       </p>
-      <CopyBlock value={LOCAL_CONFIG} />
+      <div className={styles.settingRow}>
+        <span>Repo path</span>
+        <input
+          className={styles.input}
+          type="text"
+          placeholder={REPO_PATH_PLACEHOLDER}
+          value={repoPath}
+          onChange={(e) => onRepoPathChange(e.target.value)}
+        />
+      </div>
+      <CopyBlock value={localMcpConfig(repoPath)} />
     </div>
   );
 }
