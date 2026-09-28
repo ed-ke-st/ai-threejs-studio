@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node --import tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
+    "bundle": "tsup",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test src/*.test.ts"
@@ -17,6 +18,7 @@
     "zod": "^3.25.42"
   },
   "devDependencies": {
+    "tsup": "^8.3.5",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3"
   }
